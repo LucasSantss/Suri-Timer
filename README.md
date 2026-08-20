@@ -12,6 +12,7 @@ Extensão de navegador em Manifest V3 que destaca com cor cada cliente da fila d
 - `options.html` / `options.js` — página de configurações (tema, regras de tempo e domínios)
 - `popup.html` / `popup.js` — menu rápido (ícone da extensão) com as mesmas configurações
 - `vendor/darkreader.js` — build oficial (UMD) da biblioteca [Dark Reader](https://github.com/darkreader/darkreader) (MIT, ver `vendor/darkreader-LICENSE.txt`), usada para o tema escuro da página inteira
+- `icons/` — ícones da extensão (16/32/48/128px), recortados de `suri-cbm-logo-blue.png` (o wordmark "suri", sem a tagline "by Chatbot Maker")
 
 ## Como carregar localmente
 
