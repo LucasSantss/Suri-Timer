@@ -13,9 +13,11 @@
     return String(value ?? '').replace(/\D/g, '');
   }
 
-  // Embedded widgets (the TalkJS chat iframe) don't get their own domain
-  // toggle — they just follow whichever portal is actually embedding them,
-  // via `location.ancestorOrigins` (the origins of every enclosing frame).
+  // Embedded widgets (TalkJS chat, the "V2" internal-chat iframe) don't get
+  // their own domain toggle — they just follow whichever portal is actually
+  // embedding them, found by walking `location.ancestorOrigins` (nearest
+  // enclosing frame first) until one matches a known domain. This also
+  // covers double-nested iframes (portal → wrapper → widget).
   function isDomainEnabled(cfg) {
     const domains = cfg?.domains;
     if (!domains || typeof domains !== 'object') {
@@ -23,14 +25,16 @@
     }
 
     const ancestorOrigins = window.location.ancestorOrigins;
-    if (ancestorOrigins && ancestorOrigins.length > 0) {
-      try {
-        const parentHostname = new URL(ancestorOrigins[0]).hostname;
-        if (Object.prototype.hasOwnProperty.call(domains, parentHostname)) {
-          return domains[parentHostname] !== false;
+    if (ancestorOrigins) {
+      for (let i = 0; i < ancestorOrigins.length; i += 1) {
+        try {
+          const ancestorHostname = new URL(ancestorOrigins[i]).hostname;
+          if (Object.prototype.hasOwnProperty.call(domains, ancestorHostname)) {
+            return domains[ancestorHostname] !== false;
+          }
+        } catch (e) {
+          // keep looking at the next ancestor
         }
-      } catch (e) {
-        // fall through to the own-hostname check below
       }
     }
 
@@ -117,6 +121,15 @@
       html.suri-dark-mode-fallback .MuiCard-root {
         background-color: #181a1b !important;
         color: #e8e6e3 !important;
+      }
+
+      /* Flow-builder node cards (Fluxos screen, react-flow-based). Same
+         "own explicit background Dark Reader isn't reaching" situation as
+         the MUI cards above — .flow-node is a plain, stable app class. */
+      html.suri-dark-mode-fallback .flow-node {
+        background-color: #181a1b !important;
+        color: #e8e6e3 !important;
+        border-color: #333a3d !important;
       }
     `;
 

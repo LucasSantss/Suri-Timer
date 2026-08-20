@@ -7,7 +7,9 @@
   "host_permissions": [
     "https://portal.chatbotmaker.io/*",
     "https://portal.suri.ai/*",
-    "https://app.talkjs.com/*"
+    "https://app.talkjs.com/*",
+    "https://app.chatbotmaker.io/*",
+    "https://flow.chatbotmaker.io/*"
   ],
   "icons": {
     "16": "icons/icon16.png",
@@ -33,7 +35,9 @@
       "matches": [
         "https://portal.chatbotmaker.io/*",
         "https://portal.suri.ai/*",
-        "https://app.talkjs.com/*"
+        "https://app.talkjs.com/*",
+        "https://app.chatbotmaker.io/*",
+        "https://flow.chatbotmaker.io/*"
       ],
       "js": ["network-interceptor.js"],
       "run_at": "document_start",
@@ -44,7 +48,9 @@
       "matches": [
         "https://portal.chatbotmaker.io/*",
         "https://portal.suri.ai/*",
-        "https://app.talkjs.com/*"
+        "https://app.talkjs.com/*",
+        "https://app.chatbotmaker.io/*",
+        "https://flow.chatbotmaker.io/*"
       ],
       "js": ["vendor/darkreader.js", "selectors.js", "storage.js", "content-script.js"],
       "run_at": "document_idle",
