@@ -49,7 +49,10 @@
   }
 
   function postConversationUpdate(phone, dateAnswer, name, conversationId) {
-    if (!phone || !dateAnswer) {
+    // WebChat visitors have no phone number at all — a name (or, at worst,
+    // the platform's own conversationId) is still enough to match a queue
+    // row by, so only dateAnswer plus *some* identifier is required here.
+    if (!dateAnswer || (!phone && !name)) {
       return;
     }
 
@@ -57,7 +60,7 @@
       source: MESSAGE_NAMESPACE,
       type: 'CONVERSATION_UPDATE',
       payload: {
-        phone,
+        phone: phone || null,
         dateAnswer,
         name: name || null,
         conversationId: conversationId || null
@@ -77,17 +80,20 @@
       return;
     }
 
+    const conversationId = record.conversationId || record.id || null;
     const phone = inferPhone(record);
-    if (!phone) {
+    const name = record.userName || null;
+
+    // Need *some* stable identifier to dedupe on — prefer the phone, fall
+    // back to the platform's own conversation id (covers WebChat visitors).
+    const key = phone || conversationId;
+    if (!key) {
       return;
     }
 
-    const name = record.userName || null;
-    const conversationId = record.conversationId || record.id || null;
-    const previous = cache.get(phone);
-
+    const previous = cache.get(key);
     if (!previous || previous.dateAnswer !== dateAnswer) {
-      cache.set(phone, { dateAnswer, name, conversationId });
+      cache.set(key, { dateAnswer, name, conversationId, phone });
       postConversationUpdate(phone, dateAnswer, name, conversationId);
     }
   }
@@ -231,8 +237,8 @@
       return;
     }
 
-    for (const [phone, entry] of cache) {
-      postConversationUpdate(phone, entry.dateAnswer, entry.name, entry.conversationId);
+    for (const entry of cache.values()) {
+      postConversationUpdate(entry.phone, entry.dateAnswer, entry.name, entry.conversationId);
     }
   });
 })();

@@ -196,16 +196,25 @@
     __last_highlight_el = el;
   }
 
-  function registerConversation(phone, dateAnswerIso, name) {
+  // WebChat visitors have no phone at all — key on whatever identifier is
+  // actually available (phone, then the platform's conversationId, then the
+  // name itself) so those conversations don't get silently dropped.
+  function registerConversation(phone, dateAnswerIso, name, conversationId) {
     const parsedDate = new Date(dateAnswerIso);
     if (Number.isNaN(parsedDate.getTime())) {
       return;
     }
 
-    conversations.set(phone, {
-      phone,
+    const normalizedName = normalizeNameForMatch(name);
+    const key = phone || conversationId || normalizedName;
+    if (!key) {
+      return;
+    }
+
+    conversations.set(key, {
+      phone: phone || null,
       name: name || null,
-      normalizedName: normalizeNameForMatch(name),
+      normalizedName,
       dateAnswer: parsedDate
     });
 
@@ -233,12 +242,15 @@
     const phone = normalizePhone(window.SuriTimerSelectors.findPhoneField(document));
     lastKnownPhone = phone || null;
 
-    if (!phone) {
-      clearHighlight();
-      return;
+    let conversation = phone ? conversations.get(phone) : null;
+
+    // No phone on the page (or no match for it) — WebChat conversations have
+    // none at all, so fall back to matching the panel's own name text.
+    if (!conversation) {
+      const nameEl = findParticipantNameElement();
+      conversation = matchConversationForText(nameEl ? nameEl.textContent : '');
     }
 
-    const conversation = conversations.get(phone);
     if (!conversation) {
       clearHighlight();
       return;
@@ -411,14 +423,16 @@
     }
 
     const payload = event.data.payload || {};
-    const phone = normalizePhone(payload.phone);
+    const phone = payload.phone ? normalizePhone(payload.phone) : null;
     const dateAnswer = payload.dateAnswer;
 
-    if (!phone || !dateAnswer) {
+    // A phone isn't required — WebChat conversations have none — but we
+    // need at least a name to ever be able to match them to a queue row.
+    if (!dateAnswer || (!phone && !payload.name)) {
       return;
     }
 
-    registerConversation(phone, dateAnswer, payload.name);
+    registerConversation(phone, dateAnswer, payload.name, payload.conversationId);
   }
 
   function installObserver() {
