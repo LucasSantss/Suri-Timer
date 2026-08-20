@@ -31,7 +31,7 @@
         "https://portal.chatbotmaker.io/*",
         "https://portal.suri.ai/*"
       ],
-      "js": ["selectors.js", "storage.js", "content-script.js"],
+      "js": ["vendor/darkreader.js", "selectors.js", "storage.js", "content-script.js"],
       "run_at": "document_idle",
       "all_frames": false
     }

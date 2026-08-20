@@ -48,8 +48,11 @@
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
-  // Inject the (scoped) highlight style for the participant name, plus the
-  // Dark Reader-style page inversion used by the "Escuro" theme (only once).
+  // Inject the (scoped) highlight style for the participant name and the
+  // queue-row marker (only once). The dark theme itself is handled entirely
+  // by the vendored Dark Reader engine (vendor/darkreader.js) — it analyzes
+  // the page's real styles instead of a blanket CSS filter, so it renders
+  // correctly on any page and keeps itself in sync with the SPA on its own.
   let __suri_injected_styles = false;
   function injectGlobalStyles() {
     if (__suri_injected_styles) return;
@@ -64,25 +67,15 @@
         transition: background-color 240ms ease, box-shadow 240ms ease, color 240ms ease;
       }
 
-      html.suri-dark-mode {
-        background: #fff !important;
-        filter: invert(1) hue-rotate(180deg) !important;
-      }
-
-      html.suri-dark-mode img,
-      html.suri-dark-mode video,
-      html.suri-dark-mode picture,
-      html.suri-dark-mode canvas,
-      html.suri-dark-mode iframe,
-      html.suri-dark-mode svg {
-        filter: invert(1) hue-rotate(180deg) !important;
-      }
-
-      /* Our own colored elements must keep their real color: cancel the
-         page-wide inversion by inverting them a second time. */
-      html.suri-dark-mode .suri-timer-highlight,
-      html.suri-dark-mode td[data-suri-colored="true"] {
-        filter: invert(1) hue-rotate(180deg) !important;
+      [data-suri-marker] {
+        position: absolute !important;
+        top: 0 !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        width: 4px !important;
+        border-radius: 2px !important;
+        pointer-events: none !important;
+        z-index: 2 !important;
       }
     `;
 
@@ -92,12 +85,43 @@
     document.head?.appendChild(style);
   }
 
-  function applyPageTheme(theme) {
-    injectGlobalStyles();
-    document.documentElement.classList.toggle('suri-dark-mode', theme === 'dark');
+  // Tell Dark Reader to leave our own colored elements exactly as we set
+  // them, instead of trying to "fix" their colors into its dark palette.
+  const DARK_READER_FIXES = {
+    ignoreInlineStyle: ['.suri-timer-highlight', '[data-suri-marker]']
+  };
+
+  let __lastAppliedTheme = null;
+
+  function applyPageTheme(theme, brightness, contrast) {
+    if (!window.DarkReader) return;
+
+    const signature = `${theme}|${brightness ?? 100}|${contrast ?? 100}`;
+    if (signature === __lastAppliedTheme) {
+      return;
+    }
+    __lastAppliedTheme = signature;
+
+    if (theme === 'dark') {
+      window.DarkReader.enable(
+        { brightness: brightness ?? 100, contrast: contrast ?? 100 },
+        DARK_READER_FIXES
+      );
+    } else {
+      window.DarkReader.disable();
+    }
   }
 
+  // The name element rarely changes while the same conversation stays open,
+  // so avoid re-scanning the details panel on every tick.
+  let __cachedNameEl = null;
+  let __cachedNamePhone = null;
+
   function findParticipantNameElement() {
+    if (__cachedNameEl && __cachedNamePhone === lastKnownPhone && document.contains(__cachedNameEl)) {
+      return __cachedNameEl;
+    }
+
     try {
       const container = window.SuriTimerSelectors?.findDetailsPanel(document) || document.body;
       const candidates = Array.from(container.querySelectorAll('h1,h2,h3,strong,b,div,span,p'));
@@ -108,12 +132,16 @@
         if (text.length < 4 || text.length > 60) continue;
         if (/\d/.test(text)) continue;
         if (text.split(/\s+/).length >= 2) {
+          __cachedNameEl = el;
+          __cachedNamePhone = lastKnownPhone;
           return el;
         }
       }
     } catch (err) {
       // ignore
     }
+
+    __cachedNameEl = null;
     return null;
   }
 
@@ -128,7 +156,6 @@
   }
 
   function applyNameHighlight(color) {
-    injectGlobalStyles();
     const el = findParticipantNameElement();
     if (!el) {
       clearHighlight();
@@ -141,9 +168,16 @@
       __last_highlight_el.style.color = '';
     }
 
-    el.classList.add('suri-timer-highlight');
-    el.style.backgroundColor = hexToRgba(color, 0.16);
-    el.style.setProperty('--suri-accent', color);
+    // Skip the style write (and the repaint it triggers) when the color
+    // hasn't actually changed since the last tick.
+    if (el.dataset.suriColor !== color) {
+      injectGlobalStyles();
+      el.classList.add('suri-timer-highlight');
+      el.style.backgroundColor = hexToRgba(color, 0.16);
+      el.style.setProperty('--suri-accent', color);
+      el.dataset.suriColor = color;
+    }
+
     __last_highlight_el = el;
   }
 
@@ -153,7 +187,26 @@
       return;
     }
 
-    conversations.set(phone, { phone, name: name || null, dateAnswer: parsedDate });
+    conversations.set(phone, {
+      phone,
+      name: name || null,
+      normalizedName: normalizeNameForMatch(name),
+      dateAnswer: parsedDate
+    });
+
+    scheduleRefresh();
+  }
+
+  // A burst of network responses can register many conversations at once —
+  // debounce so we repaint the queue once per burst instead of once per row.
+  let __scheduleRefreshTimer = null;
+  function scheduleRefresh() {
+    if (!domainEnabled) return;
+    if (__scheduleRefreshTimer) clearTimeout(__scheduleRefreshTimer);
+    __scheduleRefreshTimer = setTimeout(() => {
+      __scheduleRefreshTimer = null;
+      refreshAll();
+    }, 150);
   }
 
   function refreshActiveConversationColor() {
@@ -230,8 +283,7 @@
     if (!normalizedText) return null;
 
     for (const conversation of conversations.values()) {
-      const normalizedName = normalizeNameForMatch(conversation.name);
-      if (normalizedName && namesLikelyMatch(normalizedText, normalizedName)) {
+      if (conversation.normalizedName && namesLikelyMatch(normalizedText, conversation.normalizedName)) {
         return conversation;
       }
     }
@@ -239,26 +291,38 @@
     return null;
   }
 
-  // Target the cell that holds the name/tags text, not the avatar cell — the
-  // avatar <img> has its own dark-mode filter exemption, and nesting two
-  // independent invert-cancelling filters would double-cancel the image.
-  function getStyleTargetCell(row) {
-    const nameEl = row.querySelector(ROW_NAME_SELECTOR);
-    return (nameEl && nameEl.closest('td')) || row.querySelector('td');
+  // A thin vertical stripe on the row's left edge, full height. It's its own
+  // element (not a wrapper around the avatar <img>) so its dark-mode filter
+  // exemption never conflicts with the avatar's own exemption.
+  function getMarkerHost(row) {
+    return row.querySelector('td.cell-center') || row.querySelector('td');
   }
 
   function styleRow(row, color) {
-    const cell = getStyleTargetCell(row);
-    if (!cell) return;
-    cell.style.setProperty('box-shadow', `inset 4px 0 0 0 ${color}`, 'important');
-    cell.setAttribute('data-suri-colored', 'true');
+    const host = getMarkerHost(row);
+    if (!host) return;
+
+    let marker = host.querySelector(':scope > [data-suri-marker]');
+    if (!marker) {
+      marker = document.createElement('span');
+      marker.setAttribute('data-suri-marker', 'true');
+      if (getComputedStyle(host).position === 'static') {
+        host.style.position = 'relative';
+      }
+      host.appendChild(marker);
+    }
+
+    // Skip the write (and the repaint it triggers) when unchanged.
+    if (marker.dataset.suriColor === color) return;
+    marker.style.backgroundColor = color;
+    marker.dataset.suriColor = color;
   }
 
   function clearRowStyle(row) {
-    const cell = row.querySelector('td[data-suri-colored="true"]');
-    if (!cell) return;
-    cell.style.removeProperty('box-shadow');
-    cell.removeAttribute('data-suri-colored');
+    const marker = row.querySelector('[data-suri-marker]');
+    if (marker) {
+      marker.remove();
+    }
   }
 
   function refreshQueueColors() {
@@ -295,6 +359,11 @@
   }
 
   function refreshAll() {
+    // Cheap no-op once the theme is already applied (Dark Reader keeps
+    // itself in sync with the page on its own after enable() is called).
+    if (domainEnabled && config) {
+      applyPageTheme(config.theme, config.themeBrightness, config.themeContrast);
+    }
     refreshActiveConversationColor();
     refreshQueueColors();
   }
@@ -349,10 +418,14 @@
       refreshTimer = setTimeout(refreshAll, 250);
     });
 
+    // characterData is deliberately left out — a live chat re-fires text
+    // mutations constantly (timestamps, message text), which made this fire
+    // far more often than needed. The 1s interval already guarantees the
+    // colors stay in sync; the observer here just reacts faster to actual
+    // structural changes (opening a conversation, new rows in the queue).
     observer.observe(document.body, {
       childList: true,
-      subtree: true,
-      characterData: true
+      subtree: true
     });
   }
 
@@ -377,7 +450,7 @@
       return;
     }
 
-    applyPageTheme(config.theme);
+    applyPageTheme(config.theme, config.themeBrightness, config.themeContrast);
     startColorLoop();
     installObserver();
     refreshAll();
@@ -401,7 +474,7 @@
     if (!domainEnabled) {
       return;
     }
-    applyPageTheme(config?.theme);
+    applyPageTheme(config?.theme, config?.themeBrightness, config?.themeContrast);
     startColorLoop();
     installObserver();
     refreshAll();

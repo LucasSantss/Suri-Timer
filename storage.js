@@ -3,6 +3,8 @@
 
   const DEFAULT_CONFIG = {
     theme: 'light',
+    themeBrightness: 100,
+    themeContrast: 100,
     thresholds: [
       { minMinutes: 0, color: '#22c55e' },
       { minMinutes: 5, color: '#facc15' },

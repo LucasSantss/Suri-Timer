@@ -182,4 +182,36 @@
 
     return originalSend.apply(this, args);
   };
+
+  // Real-time queue updates (a client entering "Atendimentos") often arrive
+  // as WebSocket push messages rather than a fresh fetch/XHR response — those
+  // clients never appeared in an intercepted HTTP response otherwise, which
+  // is why some rows had no captured dateAnswer despite the data existing.
+  if (typeof window.WebSocket === 'function') {
+    const OriginalWebSocket = window.WebSocket;
+
+    function PatchedWebSocket(url, protocols) {
+      const socket = protocols === undefined
+        ? new OriginalWebSocket(url)
+        : new OriginalWebSocket(url, protocols);
+
+      socket.addEventListener('message', (event) => {
+        try {
+          if (typeof event.data === 'string') {
+            processTextBody(event.data);
+          } else if (event.data instanceof Blob) {
+            event.data.text().then(processTextBody).catch(() => {});
+          }
+        } catch (error) {
+          // Ignore frames we cannot inspect.
+        }
+      });
+
+      return socket;
+    }
+
+    PatchedWebSocket.prototype = OriginalWebSocket.prototype;
+    Object.setPrototypeOf(PatchedWebSocket, OriginalWebSocket);
+    window.WebSocket = PatchedWebSocket;
+  }
 })();

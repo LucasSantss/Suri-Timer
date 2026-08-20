@@ -7,6 +7,8 @@ const DOMAIN_LIST = [
 
 const state = {
   theme: 'light',
+  themeBrightness: 100,
+  themeContrast: 100,
   thresholds: [DEFAULT_RULE],
   domains: {
     'portal.chatbotmaker.io': true,
@@ -25,6 +27,17 @@ function updateThemeButtons() {
   document.querySelectorAll('.theme-option').forEach((button) => {
     button.classList.toggle('active', button.dataset.theme === state.theme);
   });
+}
+
+function updateSliders() {
+  const brightness = document.getElementById('brightness');
+  const contrast = document.getElementById('contrast');
+  const brightnessValue = document.getElementById('brightnessValue');
+  const contrastValue = document.getElementById('contrastValue');
+  if (brightness) brightness.value = state.themeBrightness;
+  if (contrast) contrast.value = state.themeContrast;
+  if (brightnessValue) brightnessValue.textContent = `${state.themeBrightness}%`;
+  if (contrastValue) contrastValue.textContent = `${state.themeContrast}%`;
 }
 
 function renderDomains() {
@@ -134,6 +147,8 @@ function saveConfig(options = {}) {
 
   const config = {
     theme: state.theme,
+    themeBrightness: state.themeBrightness,
+    themeContrast: state.themeContrast,
     thresholds: state.thresholds,
     domains: state.domains
   };
@@ -156,11 +171,14 @@ async function init() {
 
   const config = await window.SuriTimerStorage.getConfig();
   state.theme = config.theme || 'light';
+  state.themeBrightness = config.themeBrightness ?? 100;
+  state.themeContrast = config.themeContrast ?? 100;
   state.thresholds = (config.thresholds && config.thresholds.length) ? config.thresholds : [DEFAULT_RULE];
   state.domains = { ...state.domains, ...(config.domains || {}) };
 
   normalizeThresholds();
   updateThemeButtons();
+  updateSliders();
   renderDomains();
   renderRules();
 }
@@ -171,6 +189,22 @@ document.querySelectorAll('.theme-option').forEach((button) => {
     updateThemeButtons();
     saveConfig({ message: `Tema ${button.dataset.theme === 'dark' ? 'escuro' : 'claro'} aplicado.` });
   });
+});
+
+document.getElementById('brightness').addEventListener('input', (event) => {
+  state.themeBrightness = Number(event.target.value);
+  updateSliders();
+});
+document.getElementById('brightness').addEventListener('change', () => {
+  saveConfig({ message: 'Brilho ajustado.' });
+});
+
+document.getElementById('contrast').addEventListener('input', (event) => {
+  state.themeContrast = Number(event.target.value);
+  updateSliders();
+});
+document.getElementById('contrast').addEventListener('change', () => {
+  saveConfig({ message: 'Contraste ajustado.' });
 });
 
 document.getElementById('addRule').addEventListener('click', () => {

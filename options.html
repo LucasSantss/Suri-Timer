@@ -147,6 +147,23 @@
         border-radius: 14px;
       }
 
+      .slider-row {
+        margin-top: 16px;
+      }
+
+      .slider-row label {
+        display: flex;
+        justify-content: space-between;
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+
+      .slider-row input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+
       .preview {
         display: flex;
         align-items: center;
@@ -361,6 +378,19 @@
               <div class="theme-toggle">
                 <button type="button" class="theme-option" data-theme="light">Claro</button>
                 <button type="button" class="theme-option" data-theme="dark">Escuro</button>
+              </div>
+            </div>
+
+            <div class="section">
+              <h2>Ajustes do tema escuro</h2>
+              <p class="help-text">Só afetam a página quando o tema Escuro está ativo.</p>
+              <div class="slider-row">
+                <label>Brilho <span id="brightnessValue">100%</span></label>
+                <input type="range" id="brightness" min="50" max="150" step="5" value="100" />
+              </div>
+              <div class="slider-row">
+                <label>Contraste <span id="contrastValue">100%</span></label>
+                <input type="range" id="contrast" min="50" max="150" step="5" value="100" />
               </div>
             </div>
           </div>

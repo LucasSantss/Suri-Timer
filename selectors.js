@@ -83,19 +83,30 @@
     return null;
   }
 
+  // Scanning every aside/section/div on the page is expensive on a busy chat
+  // UI (thousands of elements) — the panel container rarely changes while a
+  // conversation is open, so cache it and only rescan when it disappears.
+  let cachedPanel = null;
+
   function findDetailsPanel(root = document) {
     const body = root.body || root;
     if (!body) return null;
+
+    if (cachedPanel && body.contains(cachedPanel)) {
+      return cachedPanel;
+    }
 
     const candidates = Array.from(body.querySelectorAll('aside, section, div, [role="complementary"], [role="dialog"], [data-testid]'));
 
     for (const candidate of candidates) {
       const label = getElementText(candidate).toUpperCase();
       if (label.includes('DETALHES') || label.includes('DETAILS') || label.includes('SESSÃO') || label.includes('SESSION')) {
+        cachedPanel = candidate;
         return candidate;
       }
     }
 
+    cachedPanel = body;
     return body;
   }
 
