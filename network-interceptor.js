@@ -149,6 +149,21 @@
     }
   }
 
+  // Real-time single-conversation updates are often fetched with
+  // `xhr.responseType = "json"` instead of the default text/"" — the browser
+  // parses the body itself in that case, so `.responseText` throws and those
+  // requests were silently skipped. `.response` already holds the parsed
+  // object there, no JSON.parse needed.
+  function processResponseValue(value) {
+    if (typeof value === 'string') {
+      processTextBody(value);
+      return;
+    }
+    if (value && typeof value === 'object') {
+      handleParsedResponse(value);
+    }
+  }
+
   const originalFetch = window.fetch.bind(window);
   window.fetch = (...args) => {
     return originalFetch(...args).then(async (response) => {
@@ -175,8 +190,13 @@
   XMLHttpRequest.prototype.send = function (...args) {
     const handleReadyState = () => {
       try {
-        const text = this.responseText;
-        processTextBody(text);
+        const type = this.responseType;
+        if (type === '' || type === 'text') {
+          processTextBody(this.responseText);
+        } else if (type === 'json') {
+          processResponseValue(this.response);
+        }
+        // Other types (arraybuffer, blob, document) are never JSON — skip.
       } catch (error) {
         // Ignore unreadable responses.
       }

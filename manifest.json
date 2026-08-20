@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Suri Attendance Timer",
+  "name": "Suri",
   "version": "1.0.0",
   "description": "Cronômetro visual de atendimento para a plataforma Suri",
   "permissions": ["storage", "sidePanel"],
@@ -10,7 +10,7 @@
     "https://app.talkjs.com/*"
   ],
   "action": {
-    "default_title": "Suri Attendance Timer",
+    "default_title": "Suri",
     "default_popup": "popup.html"
   },
   "side_panel": {
