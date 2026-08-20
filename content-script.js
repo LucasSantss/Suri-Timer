@@ -13,11 +13,27 @@
     return String(value ?? '').replace(/\D/g, '');
   }
 
+  // Embedded widgets (the TalkJS chat iframe) don't get their own domain
+  // toggle — they just follow whichever portal is actually embedding them,
+  // via `location.ancestorOrigins` (the origins of every enclosing frame).
   function isDomainEnabled(cfg) {
     const domains = cfg?.domains;
     if (!domains || typeof domains !== 'object') {
       return true;
     }
+
+    const ancestorOrigins = window.location.ancestorOrigins;
+    if (ancestorOrigins && ancestorOrigins.length > 0) {
+      try {
+        const parentHostname = new URL(ancestorOrigins[0]).hostname;
+        if (Object.prototype.hasOwnProperty.call(domains, parentHostname)) {
+          return domains[parentHostname] !== false;
+        }
+      } catch (e) {
+        // fall through to the own-hostname check below
+      }
+    }
+
     const hostname = window.location.hostname;
     if (Object.prototype.hasOwnProperty.call(domains, hostname)) {
       return domains[hostname] !== false;
@@ -77,12 +93,47 @@
         pointer-events: none !important;
         z-index: 2 !important;
       }
+
+      /* Fallback base background for screens whose color comes from
+         JS-computed values Dark Reader can't rewrite (some Material-UI
+         sections read runtime CSS custom properties instead of static
+         stylesheet rules). This only paints the base layer — any element
+         with its own background (cards, panels, anything Dark Reader
+         already themes correctly) still sits on top of it unaffected. */
+      html.suri-dark-mode-fallback body,
+      html.suri-dark-mode-fallback #root,
+      html.suri-dark-mode-fallback main {
+        background-color: #181a1b !important;
+      }
+
+      /* MUI Card panels (.MuiCard-root) — confirmed via DevTools that their
+         emotion-generated background rule (e.g. .css-123kfj0, hash changes
+         per deploy) stays white; Dark Reader isn't converting it for some
+         reason. .MuiCard-root itself is a stable class MUI always adds
+         alongside the hashed one, so target that instead. Scoped to Card
+         specifically (not the broader .MuiPaper-root, which the app bar and
+         other already-correctly-dark elements also use) to avoid flattening
+         elevation shading Dark Reader already got right elsewhere. */
+      html.suri-dark-mode-fallback .MuiCard-root {
+        background-color: #181a1b !important;
+        color: #e8e6e3 !important;
+      }
     `;
 
     const style = document.createElement('style');
     style.setAttribute('data-suri', 'global-style');
     style.textContent = css;
     document.head?.appendChild(style);
+  }
+
+  // Without this, Dark Reader can't read the CSS rules of any stylesheet
+  // loaded with crossorigin (common with hashed build assets, e.g. Vite's
+  // index-XXXX.css) — the browser blocks JS access to .cssRules on those
+  // unless fetched directly, so those rules were silently left untouched
+  // (white backgrounds, unstyled text) even though everything else worked.
+  // This is Dark Reader's own documented fix for that exact situation.
+  if (window.DarkReader?.setFetchMethod) {
+    window.DarkReader.setFetchMethod(window.fetch.bind(window));
   }
 
   // Tell Dark Reader to leave our own colored elements exactly as we set
@@ -106,6 +157,9 @@
       return;
     }
     __lastAppliedTheme = signature;
+
+    injectGlobalStyles();
+    document.documentElement.classList.toggle('suri-dark-mode-fallback', theme === 'dark');
 
     if (theme === 'dark') {
       window.DarkReader.enable(
@@ -245,10 +299,13 @@
     let conversation = phone ? conversations.get(phone) : null;
 
     // No phone on the page (or no match for it) — WebChat conversations have
-    // none at all, so fall back to matching the panel's own name text.
+    // none at all, so fall back to matching the panel's own name text, and
+    // finally to a provisional (first-seen-here) timestamp so the highlight
+    // never simply stays off while waiting for the real data to arrive.
     if (!conversation) {
       const nameEl = findParticipantNameElement();
-      conversation = matchConversationForText(nameEl ? nameEl.textContent : '');
+      const nameText = nameEl ? nameEl.textContent : '';
+      conversation = matchConversationForText(nameText) || getProvisionalConversation(nameText);
     }
 
     if (!conversation) {
@@ -318,6 +375,27 @@
     return null;
   }
 
+  // A client can appear in the queue before the network/WebSocket message
+  // carrying its real dateAnswer is captured (or that message may never
+  // include one at all for some status changes) — rather than leaving the
+  // row with no color while we wait, remember the moment *we* first saw it
+  // and use that as a stand-in start time. Real data (once matched above)
+  // always takes priority over this — it's only ever a fallback.
+  const firstSeenAt = new Map(); // normalizedText -> Date
+
+  function getProvisionalConversation(text) {
+    const normalizedText = normalizeNameForMatch(text);
+    if (!normalizedText) return null;
+
+    let seenAt = firstSeenAt.get(normalizedText);
+    if (!seenAt) {
+      seenAt = new Date();
+      firstSeenAt.set(normalizedText, seenAt);
+    }
+
+    return { name: text, normalizedName: normalizedText, dateAnswer: seenAt, provisional: true };
+  }
+
   // A thin vertical stripe on the row's left edge, full height. It's its own
   // element (not a wrapper around the avatar <img>) so its dark-mode filter
   // exemption never conflicts with the avatar's own exemption.
@@ -361,7 +439,7 @@
     for (const row of rows) {
       const nameEl = row.querySelector(ROW_NAME_SELECTOR);
       const text = nameEl ? (nameEl.getAttribute('title') || nameEl.textContent || '') : '';
-      const conversation = matchConversationForText(text);
+      const conversation = matchConversationForText(text) || getProvisionalConversation(text);
 
       if (!conversation) {
         clearRowStyle(row);
@@ -521,10 +599,33 @@
   window.addEventListener('message', handleMessage, false);
 
   // network-interceptor.js runs from document_start and may have already
-  // processed the page's first conversation-list responses before this
-  // script (document_idle) attached the listener above — ask it to replay
-  // everything it has captured so far, so nothing gets missed.
-  window.postMessage({ source: MESSAGE_NAMESPACE, type: 'REQUEST_SNAPSHOT' }, window.location.origin);
+  // processed conversation-list responses before this script (document_idle)
+  // attached the listener above, or before the user switched back to this
+  // tab/page — ask it to replay everything captured so far, so no client is
+  // ever permanently left without its color just because of timing.
+  function requestSnapshot() {
+    window.postMessage({ source: MESSAGE_NAMESPACE, type: 'REQUEST_SNAPSHOT' }, window.location.origin);
+  }
+
+  requestSnapshot();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      requestSnapshot();
+    }
+  });
+  window.addEventListener('focus', requestSnapshot);
+  window.addEventListener('pageshow', requestSnapshot);
+
+  // A slow background safety net: re-syncs with whatever network-interceptor
+  // has captured even if some earlier message was somehow missed, without
+  // needing a reload. Cheap — it only replays already-captured in-memory
+  // data, no network traffic.
+  setInterval(() => {
+    if (domainEnabled) {
+      requestSnapshot();
+    }
+  }, 15000);
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') {
     init();

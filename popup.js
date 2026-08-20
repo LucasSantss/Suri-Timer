@@ -1,9 +1,10 @@
 const DEFAULT_RULE = { minMinutes: 0, color: '#22c55e' };
 
+// The TalkJS chat iframe has no toggle of its own — it just follows
+// whichever of these portal domains is actually embedding it.
 const DOMAIN_LIST = [
   { hostname: 'portal.chatbotmaker.io', label: 'Chatbot Maker' },
-  { hostname: 'portal.suri.ai', label: 'Suri' },
-  { hostname: 'app.talkjs.com', label: 'Chat (widget de mensagens)' }
+  { hostname: 'portal.suri.ai', label: 'Suri' }
 ];
 
 const state = {
@@ -13,8 +14,7 @@ const state = {
   thresholds: [DEFAULT_RULE],
   domains: {
     'portal.chatbotmaker.io': true,
-    'portal.suri.ai': true,
-    'app.talkjs.com': true
+    'portal.suri.ai': true
   }
 };
 
