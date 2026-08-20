@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Suri Attendance Timer",
+  "version": "1.0.0",
+  "description": "Cronômetro visual de atendimento para a plataforma Suri",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "action": {
+    "default_title": "Suri Attendance Timer"
+  },
+  "side_panel": {
+    "default_path": "options.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*/*",
+        "http://*/*"
+      ],
+      "js": ["selectors.js", "network-interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://*/*",
+        "http://*/*"
+      ],
+      "js": ["selectors.js", "storage.js", "content-script.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
+}

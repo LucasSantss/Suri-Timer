@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Suri Timer</title>
+    <style>
+      :root {
+        --bg: #07111f;
+        --bg-2: #0f1d2d;
+        --panel: rgba(17, 24, 39, 0.88);
+        --panel-strong: rgba(15, 23, 42, 0.96);
+        --line: rgba(148, 163, 184, 0.2);
+        --text: #e5edf8;
+        --muted: #9db1c9;
+        --accent: #6ea8fe;
+        --accent-2: #8b5cf6;
+        --success: #22c55e;
+        --warning: #facc15;
+        --danger: #ef4444;
+        --shadow: rgba(2, 8, 23, 0.55);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, rgba(110, 168, 254, 0.12), transparent 30%),
+          linear-gradient(180deg, var(--bg), var(--bg-2));
+        color: var(--text);
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+
+      .app {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 28px 20px 52px;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .logo {
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: white;
+        font-weight: 800;
+        box-shadow: 0 8px 22px rgba(110, 168, 254, 0.28);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.8rem, 2vw, 2.5rem);
+        letter-spacing: -0.04em;
+      }
+
+      .theme-toggle {
+        display: flex;
+        border: 1px solid var(--line);
+        background: rgba(15, 23, 42, 0.6);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+
+      .theme-option {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        padding: 10px 16px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .theme-option.active {
+        background: linear-gradient(135deg, rgba(110, 168, 254, 0.18), rgba(139, 92, 246, 0.2));
+        color: var(--text);
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 20px 40px var(--shadow);
+        overflow: hidden;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 12px;
+        padding: 14px 18px 8px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.01);
+      }
+
+      .tab {
+        background: transparent;
+        border: 0;
+        color: var(--muted);
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .tab.active {
+        background: rgba(110, 168, 254, 0.12);
+        color: var(--text);
+      }
+
+      .content {
+        padding: 22px 18px 18px;
+      }
+
+      .section {
+        margin-bottom: 26px;
+      }
+
+      .section h2 {
+        margin: 0 0 14px;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .gray-box {
+        padding: 16px;
+        border: 1px solid var(--line);
+        background: rgba(15, 23, 42, 0.34);
+        border-radius: 14px;
+      }
+
+      .preview {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 120px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: rgba(15, 23, 42, 0.5);
+      }
+
+      .timer-demo {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.9);
+        color: var(--text);
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        box-shadow: 0 8px 26px rgba(15, 23, 42, 0.3);
+      }
+
+      .timer-label {
+        color: #cbd5e1;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .timer-value {
+        font-size: 15px;
+        font-weight: 800;
+      }
+
+      .rules {
+        display: grid;
+        gap: 12px;
+      }
+
+      .rule-row {
+        display: grid;
+        grid-template-columns: 1.4fr 1fr 1fr auto;
+        gap: 12px;
+        align-items: center;
+        background: rgba(15, 23, 42, 0.5);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+      }
+
+      .rule-row label {
+        display: block;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+
+      input[type="number"], input[type="color"] {
+        width: 100%;
+        height: 42px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: rgba(15, 23, 42, 0.9);
+        color: var(--text);
+        padding: 8px 10px;
+      }
+
+      input[type="color"] {
+        padding: 4px;
+        min-width: 72px;
+      }
+
+      .btn-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .btn {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(15, 23, 42, 0.8);
+        color: var(--text);
+        padding: 10px 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .btn.primary {
+        background: linear-gradient(135deg, rgba(110, 168, 254, 0.22), rgba(139, 92, 246, 0.22));
+        border-color: rgba(110, 168, 254, 0.32);
+      }
+
+      .btn.danger {
+        color: #fecaca;
+        border-color: rgba(239, 68, 68, 0.26);
+      }
+
+      .status {
+        min-height: 22px;
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 640px) {
+        .rule-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="header">
+        <div class="title-wrap">
+          <div class="logo">S</div>
+          <h1>Suri Timer</h1>
+        </div>
+
+        <div class="theme-toggle" aria-label="Tema do cronômetro">
+          <button type="button" class="theme-option active" data-theme="dark">Escuro</button>
+          <button type="button" class="theme-option" data-theme="light">Claro</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="tabs">
+          <button type="button" class="tab active">Tema</button>
+          <button type="button" class="tab">Tempos</button>
+        </div>
+
+        <div class="content">
+          <div class="section">
+            <h2>Visualização</h2>
+            <div class="gray-box preview">
+              <div class="timer-demo" id="previewBadge">
+                <span class="timer-label">Atendimento</span>
+                <span class="timer-value" id="previewValue">00:00</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <h2>Regras de tempo</h2>
+            <div id="rules" class="rules"></div>
+            <div class="btn-row">
+              <button id="addRule" class="btn primary" type="button">+ Adicionar regra</button>
+              <button id="save" class="btn primary" type="button">Salvar</button>
+            </div>
+          </div>
+
+          <div id="status" class="status" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="storage.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>
