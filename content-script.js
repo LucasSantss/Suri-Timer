@@ -71,6 +71,106 @@
     wrapper.style.setProperty('--timer-muted', palette.muted);
   }
 
+  // Inject global page theme and highlight styles (only once)
+  let __suri_injected_styles = false;
+  function injectGlobalStyles() {
+    if (__suri_injected_styles) return;
+    __suri_injected_styles = true;
+
+    const css = `
+      html.suri-theme-dark, html.suri-theme-dark * {
+        background-color: #0f1724 !important;
+        color: #e5edf8 !important;
+        border-color: rgba(148,163,184,0.12) !important;
+        box-shadow: none !important;
+        background-image: none !important;
+      }
+
+      html.suri-theme-light, html.suri-theme-light * {
+        background-color: #ffffff !important;
+        color: #111827 !important;
+        border-color: rgba(15,23,42,0.06) !important;
+      }
+
+      .suri-timer-highlight {
+        display: inline-block !important;
+        padding: 2px 8px !important;
+        border-radius: 8px !important;
+        box-shadow: 0 6px 18px rgba(2,6,23,0.12) !important;
+        transition: background-color 240ms ease, box-shadow 240ms ease, color 240ms ease;
+      }
+    `;
+
+    const style = document.createElement('style');
+    style.setAttribute('data-suri', 'global-style');
+    style.textContent = css;
+    document.head?.appendChild(style);
+  }
+
+  function hexToRgba(hex, alpha) {
+    if (!hex) return `rgba(34,197,94,${alpha})`;
+    const clean = hex.replace('#', '');
+    const bigint = parseInt(clean.length === 3 ? clean.split('').map(c=>c+c).join('') : clean, 16);
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  function findParticipantNameElement() {
+    try {
+      const container = window.SuriTimerSelectors?.findDetailsPanel(document) || document.body;
+      const candidates = Array.from(container.querySelectorAll('h1,h2,h3,strong,b,div,span,p'));
+
+      for (const el of candidates) {
+        const text = (el.textContent || '').trim();
+        if (!text) continue;
+        if (text.length < 4 || text.length > 60) continue;
+        if (/\d/.test(text)) continue;
+        if (text.split(/\s+/).length >= 2) {
+          return el;
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+    return null;
+  }
+
+  let __last_highlight_el = null;
+  function applyNameHighlight(color) {
+    injectGlobalStyles();
+    const el = findParticipantNameElement();
+    if (!el) {
+      if (__last_highlight_el) {
+        __last_highlight_el.classList.remove('suri-timer-highlight');
+        __last_highlight_el.style.backgroundColor = '';
+        __last_highlight_el.style.color = '';
+        __last_highlight_el = null;
+      }
+      return;
+    }
+
+    if (__last_highlight_el && __last_highlight_el !== el) {
+      __last_highlight_el.classList.remove('suri-timer-highlight');
+      __last_highlight_el.style.backgroundColor = '';
+      __last_highlight_el.style.color = '';
+    }
+
+    el.classList.add('suri-timer-highlight');
+    const bg = hexToRgba(color, 0.12);
+    el.style.backgroundColor = bg;
+    el.style.setProperty('--suri-accent', color);
+    __last_highlight_el = el;
+  }
+
+  function applyPageThemeClass() {
+    injectGlobalStyles();
+    if (!config || !config.theme) return;
+    document.documentElement.classList.remove('suri-theme-dark', 'suri-theme-light');
+    document.documentElement.classList.add(`suri-theme-${config.theme}`);
+  }
+
   function renderTimer() {
     if (!uiHost || !uiHost.shadowRoot) {
       return;
@@ -87,6 +187,7 @@
       valueNode.textContent = '00:00';
       labelNode.textContent = 'Atendimento';
       uiHost.style.setProperty('--timer-accent', '#8b5cf6');
+      try { applyNameHighlight(null); applyPageThemeClass(); } catch (e) {}
       return;
     }
 
@@ -98,6 +199,10 @@
     valueNode.textContent = formatElapsed(elapsed);
     labelNode.textContent = 'Atendimento';
     uiHost.style.setProperty('--timer-accent', accentColor);
+    try {
+      applyNameHighlight(accentColor);
+      applyPageThemeClass();
+    } catch (e) {}
   }
 
   function ensureUi() {

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Suri Timer</title>
+    <style>
+      body{margin:0;font-family:Inter,system-ui,Arial;background:#0f1724;color:#e5edf8;width:320px}
+      .wrap{padding:12px}
+      .row{display:flex;gap:8px;align-items:center}
+      .btn{padding:8px 10px;border-radius:8px;border:0;cursor:pointer}
+      .theme{display:flex;gap:6px;margin-top:8px}
+      .link{margin-top:10px;display:block;color:#9db1c9;text-decoration:none}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="row">
+        <strong>Suri Timer</strong>
+      </div>
+
+      <div style="margin-top:10px">Tema:</div>
+      <div class="theme">
+        <button id="dark" class="btn">Escuro</button>
+        <button id="light" class="btn">Claro</button>
+      </div>
+
+      <a id="openOptions" class="link" href="#">Abrir configurações completas</a>
+    </div>
+
+    <script src="storage.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -9,7 +9,8 @@
     "http://*/*"
   ],
   "action": {
-    "default_title": "Suri Attendance Timer"
+    "default_title": "Suri Attendance Timer",
+    "default_popup": "popup.html"
   },
   "side_panel": {
     "default_path": "options.html"
