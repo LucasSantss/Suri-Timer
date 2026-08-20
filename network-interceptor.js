@@ -82,10 +82,13 @@
       return;
     }
 
+    const name = record.userName || null;
+    const conversationId = record.conversationId || record.id || null;
     const previous = cache.get(phone);
-    if (previous !== dateAnswer) {
-      cache.set(phone, dateAnswer);
-      postConversationUpdate(phone, dateAnswer, record.userName, record.conversationId || record.id || null);
+
+    if (!previous || previous.dateAnswer !== dateAnswer) {
+      cache.set(phone, { dateAnswer, name, conversationId });
+      postConversationUpdate(phone, dateAnswer, name, conversationId);
     }
   }
 
@@ -214,4 +217,22 @@
     Object.setPrototypeOf(PatchedWebSocket, OriginalWebSocket);
     window.WebSocket = PatchedWebSocket;
   }
+
+  // This script runs at document_start (MAIN world) and can process the
+  // page's very first API responses before content-script.js (isolated
+  // world, document_idle) has even attached its postMessage listener —
+  // those early updates were silently lost. content-script.js asks for a
+  // replay of everything captured so far as soon as it wakes up.
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) {
+      return;
+    }
+    if (!event.data || event.data.source !== MESSAGE_NAMESPACE || event.data.type !== 'REQUEST_SNAPSHOT') {
+      return;
+    }
+
+    for (const [phone, entry] of cache) {
+      postConversationUpdate(phone, entry.dateAnswer, entry.name, entry.conversationId);
+    }
+  });
 })();

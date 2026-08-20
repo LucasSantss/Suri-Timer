@@ -506,6 +506,12 @@
 
   window.addEventListener('message', handleMessage, false);
 
+  // network-interceptor.js runs from document_start and may have already
+  // processed the page's first conversation-list responses before this
+  // script (document_idle) attached the listener above — ask it to replay
+  // everything it has captured so far, so nothing gets missed.
+  window.postMessage({ source: MESSAGE_NAMESPACE, type: 'REQUEST_SNAPSHOT' }, window.location.origin);
+
   if (document.readyState === 'complete' || document.readyState === 'interactive') {
     init();
   } else {

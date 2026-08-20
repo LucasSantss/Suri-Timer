@@ -12,7 +12,8 @@
     ],
     domains: {
       'portal.chatbotmaker.io': true,
-      'portal.suri.ai': true
+      'portal.suri.ai': true,
+      'app.talkjs.com': true
     }
   };
 

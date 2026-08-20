@@ -2,7 +2,8 @@ const DEFAULT_RULE = { minMinutes: 0, color: '#22c55e' };
 
 const DOMAIN_LIST = [
   { hostname: 'portal.chatbotmaker.io', label: 'Chatbot Maker' },
-  { hostname: 'portal.suri.ai', label: 'Suri' }
+  { hostname: 'portal.suri.ai', label: 'Suri' },
+  { hostname: 'app.talkjs.com', label: 'Chat (widget de mensagens)' }
 ];
 
 const state = {
@@ -12,7 +13,8 @@ const state = {
   thresholds: [DEFAULT_RULE],
   domains: {
     'portal.chatbotmaker.io': true,
-    'portal.suri.ai': true
+    'portal.suri.ai': true,
+    'app.talkjs.com': true
   }
 };
 

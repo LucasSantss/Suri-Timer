@@ -6,7 +6,8 @@
   "permissions": ["storage", "sidePanel"],
   "host_permissions": [
     "https://portal.chatbotmaker.io/*",
-    "https://portal.suri.ai/*"
+    "https://portal.suri.ai/*",
+    "https://app.talkjs.com/*"
   ],
   "action": {
     "default_title": "Suri Attendance Timer",
@@ -19,7 +20,8 @@
     {
       "matches": [
         "https://portal.chatbotmaker.io/*",
-        "https://portal.suri.ai/*"
+        "https://portal.suri.ai/*",
+        "https://app.talkjs.com/*"
       ],
       "js": ["network-interceptor.js"],
       "run_at": "document_start",
@@ -29,7 +31,8 @@
     {
       "matches": [
         "https://portal.chatbotmaker.io/*",
-        "https://portal.suri.ai/*"
+        "https://portal.suri.ai/*",
+        "https://app.talkjs.com/*"
       ],
       "js": ["vendor/darkreader.js", "selectors.js", "storage.js", "content-script.js"],
       "run_at": "document_idle",
