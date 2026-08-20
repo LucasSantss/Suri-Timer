@@ -24,7 +24,7 @@
       "js": ["network-interceptor.js"],
       "run_at": "document_start",
       "world": "MAIN",
-      "all_frames": false
+      "all_frames": true
     },
     {
       "matches": [
@@ -33,7 +33,7 @@
       ],
       "js": ["vendor/darkreader.js", "selectors.js", "storage.js", "content-script.js"],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "options_ui": {

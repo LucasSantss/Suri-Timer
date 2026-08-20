@@ -93,11 +93,16 @@
 
   let __lastAppliedTheme = null;
 
-  function applyPageTheme(theme, brightness, contrast) {
+  // `force` re-runs DarkReader.enable() even when the theme/brightness/
+  // contrast haven't changed — used when the page's own DOM changed (e.g.
+  // opening a conversation renders a new message thread + details panel)
+  // so that newly-inserted content gets themed too, not just what existed
+  // when "Escuro" was first turned on.
+  function applyPageTheme(theme, brightness, contrast, force = false) {
     if (!window.DarkReader) return;
 
     const signature = `${theme}|${brightness ?? 100}|${contrast ?? 100}`;
-    if (signature === __lastAppliedTheme) {
+    if (!force && signature === __lastAppliedTheme) {
       return;
     }
     __lastAppliedTheme = signature;
@@ -110,6 +115,16 @@
     } else {
       window.DarkReader.disable();
     }
+  }
+
+  let __themeForceTimer = null;
+  function scheduleForceTheme() {
+    if (!domainEnabled || !config || config.theme !== 'dark') return;
+    if (__themeForceTimer) clearTimeout(__themeForceTimer);
+    __themeForceTimer = setTimeout(() => {
+      __themeForceTimer = null;
+      applyPageTheme(config.theme, config.themeBrightness, config.themeContrast, true);
+    }, 1200);
   }
 
   // The name element rarely changes while the same conversation stays open,
@@ -358,11 +373,13 @@
     }
   }
 
-  function refreshAll() {
-    // Cheap no-op once the theme is already applied (Dark Reader keeps
-    // itself in sync with the page on its own after enable() is called).
+  function refreshAll(forceTheme = false) {
+    // Cheap no-op on the plain 1s tick once the theme is already applied.
+    // `forceTheme` is set when the DOM itself just changed (a conversation
+    // was opened, new content rendered) so Dark Reader re-scans and themes
+    // whatever is new — it doesn't always catch that on its own.
     if (domainEnabled && config) {
-      applyPageTheme(config.theme, config.themeBrightness, config.themeContrast);
+      applyPageTheme(config.theme, config.themeBrightness, config.themeContrast, forceTheme);
     }
     refreshActiveConversationColor();
     refreshQueueColors();
@@ -415,7 +432,14 @@
         clearTimeout(refreshTimer);
       }
 
-      refreshTimer = setTimeout(refreshAll, 250);
+      // Our own colors refresh quickly (250ms) — cheap either way, since it
+      // no-ops when nothing actually changed.
+      refreshTimer = setTimeout(() => refreshAll(false), 250);
+
+      // Re-running Dark Reader is heavier, so it gets its own longer debounce
+      // that coalesces bursts (e.g. several chat messages arriving in a row)
+      // instead of firing on every single mutation.
+      scheduleForceTheme();
     });
 
     // characterData is deliberately left out — a live chat re-fires text
