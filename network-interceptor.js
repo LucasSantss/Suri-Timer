@@ -1,25 +1,32 @@
 (() => {
   const MESSAGE_NAMESPACE = 'suri-timer-ext';
+  const MAX_PHONE_DIGITS = 15;
   const cache = new Map();
 
   function normalizePhone(value) {
     return String(value ?? '').replace(/\D/g, '');
   }
 
+  function isPlausiblePhone(digits) {
+    return digits.length >= 10 && digits.length <= MAX_PHONE_DIGITS;
+  }
+
+  // userPhone/phone are clean, dedicated fields — always prefer them. `id`/
+  // `conversationId` are opaque platform identifiers (e.g. "wp437...:5588...")
+  // that happen to contain digits too, so they are only a last-resort fallback.
   function inferPhone(record) {
     if (!record || typeof record !== 'object') {
       return null;
     }
 
-    const raw = record.id || record.conversationId || record.userPhone || record.phone || '';
-    const normalized = normalizePhone(raw);
-    if (normalized.length >= 10) {
-      return normalized;
+    const direct = normalizePhone(record.userPhone || record.phone);
+    if (isPlausiblePhone(direct)) {
+      return direct;
     }
 
-    const userPhone = normalizePhone(record.userPhone);
-    if (userPhone.length >= 10) {
-      return userPhone;
+    const fallback = normalizePhone(record.id || record.conversationId);
+    if (isPlausiblePhone(fallback)) {
+      return fallback;
     }
 
     return null;
@@ -34,15 +41,15 @@
       return value.some((item) => isLikelyConversationPayload(item));
     }
 
-    if ('conversationDateAnswer' in value || 'conversationDateRequest' in value) {
+    if ('dateAnswer' in value || 'dateRequest' in value) {
       return true;
     }
 
     return Object.values(value).some((child) => isLikelyConversationPayload(child));
   }
 
-  function postConversationUpdate(phone, conversationDateAnswer, conversationId) {
-    if (!phone || !conversationDateAnswer) {
+  function postConversationUpdate(phone, dateAnswer, name, conversationId) {
+    if (!phone || !dateAnswer) {
       return;
     }
 
@@ -51,12 +58,13 @@
       type: 'CONVERSATION_UPDATE',
       payload: {
         phone,
-        conversationDateAnswer,
+        dateAnswer,
+        name: name || null,
         conversationId: conversationId || null
       }
     };
 
-    window.postMessage(message, '*');
+    window.postMessage(message, window.location.origin);
   }
 
   function storeConversation(record) {
@@ -64,8 +72,8 @@
       return;
     }
 
-    const conversationDateAnswer = record.conversationDateAnswer;
-    if (!conversationDateAnswer || typeof conversationDateAnswer !== 'string') {
+    const dateAnswer = record.dateAnswer;
+    if (!dateAnswer || typeof dateAnswer !== 'string') {
       return;
     }
 
@@ -75,9 +83,9 @@
     }
 
     const previous = cache.get(phone);
-    if (previous !== conversationDateAnswer) {
-      cache.set(phone, conversationDateAnswer);
-      postConversationUpdate(phone, conversationDateAnswer, record.conversationId || record.id || null);
+    if (previous !== dateAnswer) {
+      cache.set(phone, dateAnswer);
+      postConversationUpdate(phone, dateAnswer, record.userName, record.conversationId || record.id || null);
     }
   }
 
@@ -93,7 +101,7 @@
       return;
     }
 
-    if ('conversationDateAnswer' in value) {
+    if ('dateAnswer' in value) {
       storeConversation(value);
     }
 
@@ -120,7 +128,7 @@
   }
 
   function processTextBody(body) {
-    if (!body || typeof body !== 'string' || !body.includes('conversationDateAnswer')) {
+    if (!body || typeof body !== 'string' || !body.includes('dateAnswer')) {
       return;
     }
 

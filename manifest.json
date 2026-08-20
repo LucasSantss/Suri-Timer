@@ -3,10 +3,10 @@
   "name": "Suri Attendance Timer",
   "version": "1.0.0",
   "description": "Cronômetro visual de atendimento para a plataforma Suri",
-  "permissions": ["storage"],
+  "permissions": ["storage", "sidePanel"],
   "host_permissions": [
-    "https://*/*",
-    "http://*/*"
+    "https://portal.chatbotmaker.io/*",
+    "https://portal.suri.ai/*"
   ],
   "action": {
     "default_title": "Suri Attendance Timer",
@@ -18,18 +18,18 @@
   "content_scripts": [
     {
       "matches": [
-        "https://*/*",
-        "http://*/*"
+        "https://portal.chatbotmaker.io/*",
+        "https://portal.suri.ai/*"
       ],
-      "js": ["selectors.js", "network-interceptor.js"],
+      "js": ["network-interceptor.js"],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": false
     },
     {
       "matches": [
-        "https://*/*",
-        "http://*/*"
+        "https://portal.chatbotmaker.io/*",
+        "https://portal.suri.ai/*"
       ],
       "js": ["selectors.js", "storage.js", "content-script.js"],
       "run_at": "document_idle",

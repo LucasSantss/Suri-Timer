@@ -1,13 +1,28 @@
 const DEFAULT_RULE = { minMinutes: 0, color: '#22c55e' };
 
+const DOMAIN_LIST = [
+  { hostname: 'portal.chatbotmaker.io', label: 'Chatbot Maker' },
+  { hostname: 'portal.suri.ai', label: 'Suri' }
+];
+
 const state = {
-  theme: 'dark',
+  theme: 'light',
   thresholds: [
     { minMinutes: 0, color: '#22c55e' },
     { minMinutes: 5, color: '#facc15' },
     { minMinutes: 15, color: '#ef4444' }
-  ]
+  ],
+  domains: {
+    'portal.chatbotmaker.io': true,
+    'portal.suri.ai': true
+  }
 };
+
+function updateThemeButtons() {
+  document.querySelectorAll('.theme-option').forEach((button) => {
+    button.classList.toggle('active', button.dataset.theme === state.theme);
+  });
+}
 
 function updatePreview() {
   const previewValue = document.getElementById('previewValue');
@@ -17,14 +32,8 @@ function updatePreview() {
   }
 
   const activeRule = [...state.thresholds].sort((a, b) => a.minMinutes - b.minMinutes).at(-1) || DEFAULT_RULE;
-  previewValue.textContent = '00:15';
-  previewBadge.style.borderColor = activeRule.color || '#22c55e';
+  previewValue.style.backgroundColor = `${activeRule.color || '#22c55e'}29`;
   previewValue.style.color = activeRule.color || '#22c55e';
-
-  const buttons = document.querySelectorAll('.theme-option');
-  buttons.forEach((button) => {
-    button.classList.toggle('active', button.dataset.theme === state.theme);
-  });
 }
 
 function renderRules() {
@@ -100,6 +109,48 @@ function renderRules() {
   });
 }
 
+function renderDomains() {
+  const root = document.getElementById('domains');
+  if (!root) {
+    return;
+  }
+
+  root.innerHTML = '';
+
+  DOMAIN_LIST.forEach(({ hostname, label }) => {
+    const row = document.createElement('div');
+    row.className = 'domain-row';
+
+    const info = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'domain-name';
+    name.textContent = label;
+    const hint = document.createElement('div');
+    hint.className = 'domain-hint';
+    hint.textContent = hostname;
+    info.appendChild(name);
+    info.appendChild(hint);
+
+    const switchLabel = document.createElement('label');
+    switchLabel.className = 'switch';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = state.domains[hostname] !== false;
+    checkbox.addEventListener('change', () => {
+      state.domains[hostname] = checkbox.checked;
+      saveConfig({ message: `Cronômetro ${checkbox.checked ? 'ativado' : 'desativado'} em ${label}.` });
+    });
+    const track = document.createElement('span');
+    track.className = 'switch-track';
+    switchLabel.appendChild(checkbox);
+    switchLabel.appendChild(track);
+
+    row.appendChild(info);
+    row.appendChild(switchLabel);
+    root.appendChild(row);
+  });
+}
+
 function normalizeThresholds() {
   const normalized = [...state.thresholds]
     .map((rule) => ({
@@ -118,20 +169,27 @@ function loadConfig() {
   }
 
   window.SuriTimerStorage.getConfig().then((config) => {
-    state.theme = config.theme || 'dark';
+    state.theme = config.theme || 'light';
     state.thresholds = (config.thresholds && config.thresholds.length)
       ? config.thresholds
       : [DEFAULT_RULE];
+    state.domains = {
+      ...state.domains,
+      ...(config.domains || {})
+    };
 
     normalizeThresholds();
+    updateThemeButtons();
     renderRules();
+    renderDomains();
     updatePreview();
   });
 }
 
-function saveConfig() {
+function saveConfig(options = {}) {
   const status = document.getElementById('status');
   normalizeThresholds();
+  renderRules();
 
   if (!window.SuriTimerStorage) {
     status.textContent = 'Storage indisponível no contexto atual.';
@@ -140,12 +198,13 @@ function saveConfig() {
 
   const config = {
     theme: state.theme,
-    thresholds: state.thresholds
+    thresholds: state.thresholds,
+    domains: state.domains
   };
 
   window.SuriTimerStorage.setConfig(config)
     .then(() => {
-      status.textContent = 'Configurações salvas com sucesso.';
+      status.textContent = options.message || 'Configurações salvas com sucesso.';
       updatePreview();
     })
     .catch((error) => {
@@ -164,12 +223,22 @@ document.getElementById('addRule').addEventListener('click', () => {
   updatePreview();
 });
 
-document.getElementById('save').addEventListener('click', saveConfig);
+document.getElementById('save').addEventListener('click', () => saveConfig());
 
 document.querySelectorAll('.theme-option').forEach((button) => {
   button.addEventListener('click', () => {
     state.theme = button.dataset.theme;
-    updatePreview();
+    updateThemeButtons();
+    saveConfig({ message: `Tema ${button.dataset.theme === 'dark' ? 'escuro' : 'claro'} aplicado.` });
+  });
+});
+
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.tab-panel').forEach((panel) => {
+      panel.classList.toggle('active', panel.dataset.panel === tab.dataset.tab);
+    });
   });
 });
 
