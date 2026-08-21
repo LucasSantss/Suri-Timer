@@ -1,6 +1,6 @@
 (() => {
   const MESSAGE_NAMESPACE = 'suri-timer-ext';
-  const conversations = new Map(); // normalizedPhone -> { phone, name, dateAnswer: Date }
+  const conversations = new Map(); // normalizedPhone -> { phone, name, queue, dateAnswer: Date|null, lastSenderChange: Date|null }
 
   let config = null;
   let domainEnabled = true;
@@ -45,8 +45,25 @@
     return true;
   }
 
+  // getActiveThreshold runs once per 'atendimento' conversation on every
+  // refresh tick (every row, every second) — re-sorting `thresholds` from
+  // scratch each call was pure waste since it only ever changes when config
+  // changes. Cache by reference: the same `config.thresholds` array is
+  // passed in on every call until the user edits "Tempos", so this collapses
+  // to a no-op except right after a real config change.
+  let __sortedThresholdsCache = null;
+  let __sortedThresholdsSource = null;
+  function getSortedThresholds(thresholds) {
+    if (__sortedThresholdsSource === thresholds && __sortedThresholdsCache) {
+      return __sortedThresholdsCache;
+    }
+    __sortedThresholdsCache = [...thresholds].sort((a, b) => a.minMinutes - b.minMinutes);
+    __sortedThresholdsSource = thresholds;
+    return __sortedThresholdsCache;
+  }
+
   function getActiveThreshold(minutes, thresholds) {
-    const sorted = [...thresholds].sort((a, b) => a.minMinutes - b.minMinutes);
+    const sorted = getSortedThresholds(thresholds);
 
     let winner = sorted[0] || { minMinutes: 0, color: '#22c55e' };
     for (const rule of sorted) {
@@ -208,16 +225,38 @@
       const container = window.SuriTimerSelectors?.findDetailsPanel(document) || document.body;
       const candidates = Array.from(container.querySelectorAll('h1,h2,h3,strong,b,div,span,p'));
 
+      // When the client has no registered name, the platform itself displays
+      // the raw phone number where the name would go — track the shortest
+      // such element as a fallback so those clients still get the highlight,
+      // instead of being silently left with no identification at all. A
+      // genuine name (found below) always wins when one exists.
+      let phoneFallback = null;
+      let phoneFallbackLength = Infinity;
+
       for (const el of candidates) {
         const text = (el.textContent || '').trim();
         if (!text) continue;
         if (text.length < 4 || text.length > 60) continue;
-        if (/\d/.test(text)) continue;
+
+        if (/\d/.test(text)) {
+          if (lastKnownPhone && normalizePhone(text) === lastKnownPhone && text.length < phoneFallbackLength) {
+            phoneFallback = el;
+            phoneFallbackLength = text.length;
+          }
+          continue;
+        }
+
         if (text.split(/\s+/).length >= 2) {
           __cachedNameEl = el;
           __cachedNamePhone = lastKnownPhone;
           return el;
         }
+      }
+
+      if (phoneFallback) {
+        __cachedNameEl = phoneFallback;
+        __cachedNamePhone = lastKnownPhone;
+        return phoneFallback;
       }
     } catch (err) {
       // ignore
@@ -263,26 +302,53 @@
     __last_highlight_el = el;
   }
 
+  function parseDateOrNull(iso) {
+    if (!iso) return null;
+    const date = new Date(iso);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  // conversationId is like "wp447721785081837:5545998280751" (WhatsApp),
+  // "wc...", "fb...", "ig..." — the letters prefix identifies the channel,
+  // which the Automático staleness rule below depends on.
+  function getChannelPrefix(conversationId) {
+    if (!conversationId) return null;
+    const match = /^([a-zA-Z]+)/.exec(conversationId);
+    return match ? match[1].toLowerCase() : null;
+  }
+
+  // Which queue a conversation is in isn't sent directly by the API — it's
+  // implied by dateAnswer/dateRequest: a human already answered (Atendimentos),
+  // otherwise the client is queued waiting for one (Esperando), otherwise it's
+  // still with the bot (Automático).
+  function classifyQueue(dateAnswer, dateRequest) {
+    if (dateAnswer) return 'atendimento';
+    if (dateRequest) return 'esperando';
+    return 'automatico';
+  }
+
   // WebChat visitors have no phone at all — key on whatever identifier is
   // actually available (phone, then the platform's conversationId, then the
   // name itself) so those conversations don't get silently dropped.
-  function registerConversation(phone, dateAnswerIso, name, conversationId) {
-    const parsedDate = new Date(dateAnswerIso);
-    if (Number.isNaN(parsedDate.getTime())) {
-      return;
-    }
-
+  function registerConversation(phone, name, conversationId, dateAnswerIso, dateRequestIso, lastSenderChangeIso) {
     const normalizedName = normalizeNameForMatch(name);
     const key = phone || conversationId || normalizedName;
     if (!key) {
       return;
     }
 
+    const dateAnswer = parseDateOrNull(dateAnswerIso);
+    const dateRequest = parseDateOrNull(dateRequestIso);
+    const lastSenderChange = parseDateOrNull(lastSenderChangeIso);
+
     conversations.set(key, {
       phone: phone || null,
       name: name || null,
       normalizedName,
-      dateAnswer: parsedDate
+      queue: classifyQueue(dateAnswer, dateRequest),
+      channelPrefix: getChannelPrefix(conversationId),
+      dateAnswer,
+      lastSenderChange
     });
 
     scheduleRefresh();
@@ -300,6 +366,48 @@
     }, 150);
   }
 
+  // Automático doesn't use the configurable time-in-queue thresholds — it's
+  // a fixed two-state indicator on how long ago the client last wrote in,
+  // independent of "Tempos" settings which only apply to Atendimentos. The
+  // staleness window itself depends on the channel (conversationId prefix):
+  // WebChat ("wc") never goes stale, Facebook/Instagram ("fb"/"ig") get a
+  // week, everything else (WhatsApp, "wp") gets the default 24h.
+  const AUTOMATICO_RECENT_COLOR = '#22c55e';
+  const AUTOMATICO_STALE_COLOR = '#ef4444';
+  const AUTOMATICO_STALE_HOURS_DEFAULT = 24;
+  const AUTOMATICO_STALE_HOURS_WEEKLY = 24 * 7;
+  const AUTOMATICO_WEEKLY_CHANNELS = new Set(['fb', 'ig']);
+
+  function getAutomaticoStaleHours(channelPrefix) {
+    if (channelPrefix === 'wc') return Infinity;
+    if (AUTOMATICO_WEEKLY_CHANNELS.has(channelPrefix)) return AUTOMATICO_STALE_HOURS_WEEKLY;
+    return AUTOMATICO_STALE_HOURS_DEFAULT;
+  }
+
+  // Returns the marker/highlight color for a conversation, or null when it
+  // should show no visual identification at all (Esperando, or no data yet).
+  function getConversationColor(conversation) {
+    if (!conversation) return null;
+
+    if (conversation.queue === 'atendimento') {
+      if (!conversation.dateAnswer) return null;
+      const elapsedMinutes = (Date.now() - conversation.dateAnswer.getTime()) / 60000;
+      const rule = getActiveThreshold(elapsedMinutes, config?.thresholds || [{ minMinutes: 0, color: '#22c55e' }]);
+      return rule.color || '#22c55e';
+    }
+
+    if (conversation.queue === 'automatico') {
+      const staleHours = getAutomaticoStaleHours(conversation.channelPrefix);
+      if (staleHours === Infinity) return AUTOMATICO_RECENT_COLOR;
+      if (!conversation.lastSenderChange) return null;
+      const elapsedHours = (Date.now() - conversation.lastSenderChange.getTime()) / 3600000;
+      return elapsedHours < staleHours ? AUTOMATICO_RECENT_COLOR : AUTOMATICO_STALE_COLOR;
+    }
+
+    // 'esperando' never gets a visual marker.
+    return null;
+  }
+
   function refreshActiveConversationColor() {
     if (!domainEnabled || !window.SuriTimerSelectors) {
       clearHighlight();
@@ -312,25 +420,21 @@
     let conversation = phone ? conversations.get(phone) : null;
 
     // No phone on the page (or no match for it) — WebChat conversations have
-    // none at all, so fall back to matching the panel's own name text, and
-    // finally to a provisional (first-seen-here) timestamp so the highlight
-    // never simply stays off while waiting for the real data to arrive.
+    // none at all, so fall back to matching the panel's own name text.
     if (!conversation) {
       const nameEl = findParticipantNameElement();
       const nameText = nameEl ? nameEl.textContent : '';
-      conversation = matchConversationForText(nameText) || getProvisionalConversation(nameText);
+      conversation = matchConversationForText(nameText);
     }
 
-    if (!conversation) {
+    const color = getConversationColor(conversation);
+    if (!color) {
       clearHighlight();
       return;
     }
 
-    const elapsedMinutes = (Date.now() - conversation.dateAnswer.getTime()) / 60000;
-    const rule = getActiveThreshold(elapsedMinutes, config?.thresholds || [{ minMinutes: 0, color: '#22c55e' }]);
-
     try {
-      applyNameHighlight(rule.color || '#22c55e');
+      applyNameHighlight(color);
     } catch (e) {
       // ignore
     }
@@ -357,13 +461,21 @@
       .trim();
   }
 
+  // Fuzzy fallback for when neither name is a substring of the other (e.g.
+  // reordered words). Requires EVERY significant word of the shorter name to
+  // appear in the longer one — not just one shared word. Now that
+  // conversations from all three queues are tracked at once (not just the
+  // handful active in Atendimentos), a single common word (a first name like
+  // "Marcos", a surname like "Almeida") is no longer rare enough to safely
+  // mean "same client" on its own.
   function namesLikelyMatch(a, b) {
-    if (!a || !b) return false;
-    if (a === b || a.includes(b) || b.includes(a)) return true;
-
-    const wordsA = new Set(a.split(' ').filter((w) => w.length >= 3));
+    const wordsA = a.split(' ').filter((w) => w.length >= 3);
     const wordsB = b.split(' ').filter((w) => w.length >= 3);
-    return wordsB.some((word) => wordsA.has(word));
+    if (!wordsA.length || !wordsB.length) return false;
+
+    const [shorter, longer] = wordsA.length <= wordsB.length ? [wordsA, wordsB] : [wordsB, wordsA];
+    const longerSet = new Set(longer);
+    return shorter.every((word) => longerSet.has(word));
   }
 
   function matchConversationForText(text) {
@@ -379,34 +491,27 @@
     const normalizedText = normalizeNameForMatch(trimmed);
     if (!normalizedText) return null;
 
+    // An exact/substring match (handles truncated row text like "Letícia |
+    // MAXHAIRCABE..." matching the full "Letícia | MAXHAIRCABELOS") is
+    // unambiguous and must always win — checked across every conversation
+    // first, so a merely-fuzzy match to some unrelated client (checked
+    // earlier only because of Map iteration order) can never shadow the
+    // correct exact match found later in the same pass.
+    let fuzzyMatch = null;
     for (const conversation of conversations.values()) {
-      if (conversation.normalizedName && namesLikelyMatch(normalizedText, conversation.normalizedName)) {
+      const name = conversation.normalizedName;
+      if (!name) continue;
+
+      if (name === normalizedText || name.includes(normalizedText) || normalizedText.includes(name)) {
         return conversation;
+      }
+
+      if (!fuzzyMatch && namesLikelyMatch(normalizedText, name)) {
+        fuzzyMatch = conversation;
       }
     }
 
-    return null;
-  }
-
-  // A client can appear in the queue before the network/WebSocket message
-  // carrying its real dateAnswer is captured (or that message may never
-  // include one at all for some status changes) — rather than leaving the
-  // row with no color while we wait, remember the moment *we* first saw it
-  // and use that as a stand-in start time. Real data (once matched above)
-  // always takes priority over this — it's only ever a fallback.
-  const firstSeenAt = new Map(); // normalizedText -> Date
-
-  function getProvisionalConversation(text) {
-    const normalizedText = normalizeNameForMatch(text);
-    if (!normalizedText) return null;
-
-    let seenAt = firstSeenAt.get(normalizedText);
-    if (!seenAt) {
-      seenAt = new Date();
-      firstSeenAt.set(normalizedText, seenAt);
-    }
-
-    return { name: text, normalizedName: normalizedText, dateAnswer: seenAt, provisional: true };
+    return fuzzyMatch;
   }
 
   // A thin vertical stripe on the row's left edge, full height. It's its own
@@ -452,18 +557,16 @@
     for (const row of rows) {
       const nameEl = row.querySelector(ROW_NAME_SELECTOR);
       const text = nameEl ? (nameEl.getAttribute('title') || nameEl.textContent || '') : '';
-      const conversation = matchConversationForText(text) || getProvisionalConversation(text);
+      const conversation = matchConversationForText(text);
+      const color = getConversationColor(conversation);
 
-      if (!conversation) {
+      if (!color) {
         clearRowStyle(row);
         continue;
       }
 
-      const elapsedMinutes = (Date.now() - conversation.dateAnswer.getTime()) / 60000;
-      const rule = getActiveThreshold(elapsedMinutes, config?.thresholds || [{ minMinutes: 0, color: '#22c55e' }]);
-
       try {
-        styleRow(row, rule.color || '#22c55e');
+        styleRow(row, color);
       } catch (e) {
         // ignore
       }
@@ -476,6 +579,16 @@
     }
   }
 
+  // refreshQueueColors() is O(rows × tracked conversations) — with Automático
+  // now tracking every conversation (not just the handful active in
+  // Atendimentos), repainting the whole visible list on every single 1s tick
+  // is wasted work: queue colors only move in minute/hour increments, so a
+  // few seconds of staleness is never visible. refreshActiveConversationColor
+  // (a single lookup for whichever conversation is open) stays on the fast
+  // 1s cycle since it's cheap and its highlight should feel responsive.
+  const QUEUE_COLORS_REFRESH_INTERVAL_MS = 4000;
+  let __lastQueueColorsRefresh = 0;
+
   function refreshAll(forceTheme = false) {
     // Cheap no-op on the plain 1s tick once the theme is already applied.
     // `forceTheme` is set when the DOM itself just changed (a conversation
@@ -485,11 +598,19 @@
       applyPageTheme(config.theme, config.themeBrightness, config.themeContrast, forceTheme);
     }
     refreshActiveConversationColor();
-    refreshQueueColors();
+
+    const now = Date.now();
+    if (now - __lastQueueColorsRefresh >= QUEUE_COLORS_REFRESH_INTERVAL_MS) {
+      __lastQueueColorsRefresh = now;
+      refreshQueueColors();
+    }
   }
 
   function startColorLoop() {
     if (colorInterval) return;
+    // Reset the throttle so the very first tick after (re)starting paints
+    // the queue list immediately instead of waiting out the interval.
+    __lastQueueColorsRefresh = 0;
     colorInterval = setInterval(refreshAll, 1000);
   }
 
@@ -515,15 +636,14 @@
 
     const payload = event.data.payload || {};
     const phone = payload.phone ? normalizePhone(payload.phone) : null;
-    const dateAnswer = payload.dateAnswer;
 
     // A phone isn't required — WebChat conversations have none — but we
     // need at least a name to ever be able to match them to a queue row.
-    if (!dateAnswer || (!phone && !payload.name)) {
+    if (!phone && !payload.name) {
       return;
     }
 
-    registerConversation(phone, dateAnswer, payload.name, payload.conversationId);
+    registerConversation(phone, payload.name, payload.conversationId, payload.dateAnswer, payload.dateRequest, payload.lastSenderChange);
   }
 
   function installObserver() {
@@ -645,4 +765,36 @@
   } else {
     document.addEventListener('DOMContentLoaded', init, { once: true });
   }
+
+  // Diagnostic surface for tracking down "client shows no color" reports —
+  // dumps, per visible row, whether it matched a tracked conversation and
+  // why it did/didn't get a color. Not used by the extension itself.
+  // Usage in the page console:
+  //   copy(JSON.stringify(window.__suriTimerDebug.getRowsSnapshot(), null, 2))
+  window.__suriTimerDebug = {
+    getConversations: () => Array.from(conversations.entries()).map(([key, c]) => ({
+      key,
+      phone: c.phone,
+      name: c.name,
+      queue: c.queue,
+      channelPrefix: c.channelPrefix,
+      dateAnswer: c.dateAnswer ? c.dateAnswer.toISOString() : null,
+      lastSenderChange: c.lastSenderChange ? c.lastSenderChange.toISOString() : null,
+      color: getConversationColor(c)
+    })),
+    getRowsSnapshot: () => getConversationRows().map((row) => {
+      const nameEl = row.querySelector(ROW_NAME_SELECTOR);
+      const text = nameEl ? (nameEl.getAttribute('title') || nameEl.textContent || '') : '';
+      const conversation = matchConversationForText(text);
+      return {
+        rowText: text,
+        matched: !!conversation,
+        matchedKey: conversation ? (conversation.phone || conversation.name) : null,
+        queue: conversation ? conversation.queue : null,
+        dateAnswer: conversation?.dateAnswer ? conversation.dateAnswer.toISOString() : null,
+        lastSenderChange: conversation?.lastSenderChange ? conversation.lastSenderChange.toISOString() : null,
+        color: conversation ? getConversationColor(conversation) : null
+      };
+    })
+  };
 })();

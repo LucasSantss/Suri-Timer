@@ -48,11 +48,23 @@
     return Object.values(value).some((child) => isLikelyConversationPayload(child));
   }
 
-  function postConversationUpdate(phone, dateAnswer, name, conversationId) {
+  // A conversation's queue (Atendimentos / Automático / Esperando) isn't a
+  // field the API sends directly — it's implied by which of dateAnswer /
+  // dateRequest are set: dateAnswer present means a human already answered
+  // (Atendimentos); otherwise dateRequest present means the client is
+  // queued waiting for a human (Esperando); otherwise it's still with the
+  // bot (Automático), where lastSenderChange (the client's last message) is
+  // what content-script.js uses instead.
+  function postConversationUpdate(entry) {
     // WebChat visitors have no phone number at all — a name (or, at worst,
     // the platform's own conversationId) is still enough to match a queue
-    // row by, so only dateAnswer plus *some* identifier is required here.
-    if (!dateAnswer || (!phone && !name)) {
+    // row by, so only *some* identifier is required here.
+    if (!entry || (!entry.phone && !entry.name)) {
+      return;
+    }
+
+    // Need at least one queue-state field to classify the conversation.
+    if (!entry.dateAnswer && !entry.dateRequest && !entry.lastSenderChange) {
       return;
     }
 
@@ -60,10 +72,12 @@
       source: MESSAGE_NAMESPACE,
       type: 'CONVERSATION_UPDATE',
       payload: {
-        phone: phone || null,
-        dateAnswer,
-        name: name || null,
-        conversationId: conversationId || null
+        phone: entry.phone || null,
+        name: entry.name || null,
+        conversationId: entry.conversationId || null,
+        dateAnswer: entry.dateAnswer || null,
+        dateRequest: entry.dateRequest || null,
+        lastSenderChange: entry.lastSenderChange || null
       }
     };
 
@@ -75,14 +89,8 @@
       return;
     }
 
-    const dateAnswer = record.dateAnswer;
-    if (!dateAnswer || typeof dateAnswer !== 'string') {
-      return;
-    }
-
     const conversationId = record.conversationId || record.id || null;
     const phone = inferPhone(record);
-    const name = record.userName || null;
 
     // Need *some* stable identifier to dedupe on — prefer the phone, fall
     // back to the platform's own conversation id (covers WebChat visitors).
@@ -91,10 +99,17 @@
       return;
     }
 
+    const dateAnswer = typeof record.dateAnswer === 'string' ? record.dateAnswer : null;
+    const dateRequest = typeof record.dateRequest === 'string' ? record.dateRequest : null;
+    const lastSenderChange = typeof record.lastSenderChange === 'string' ? record.lastSenderChange : null;
+    const name = record.userName || null;
+
+    const signature = `${dateAnswer}|${dateRequest}|${lastSenderChange}`;
     const previous = cache.get(key);
-    if (!previous || previous.dateAnswer !== dateAnswer) {
-      cache.set(key, { dateAnswer, name, conversationId, phone });
-      postConversationUpdate(phone, dateAnswer, name, conversationId);
+    if (!previous || previous.signature !== signature) {
+      const entry = { phone, name, conversationId, dateAnswer, dateRequest, lastSenderChange, signature };
+      cache.set(key, entry);
+      postConversationUpdate(entry);
     }
   }
 
@@ -258,7 +273,7 @@
     }
 
     for (const entry of cache.values()) {
-      postConversationUpdate(entry.phone, entry.dateAnswer, entry.name, entry.conversationId);
+      postConversationUpdate(entry);
     }
   });
 })();
