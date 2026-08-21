@@ -329,7 +329,7 @@
   // which made a heuristic misclassify still-Esperando conversations as
   // Atendimentos. A conversation with no usable `queue` gets no color at all
   // (see getConversationColor) rather than a guessed one.
-  function registerConversation(phone, name, conversationId, dateAnswerIso, dateRequestIso, lastSenderChangeIso, agentId, queue) {
+  function registerConversation(phone, name, conversationId, dateAnswerIso, dateRequestIso, lastSenderChangeIso, agentId, queue, agentName) {
     const normalizedName = normalizeNameForMatch(name);
     const key = phone || conversationId || normalizedName;
     if (!key) {
@@ -349,6 +349,7 @@
       dateAnswer,
       dateRequest,
       agentId: agentId || null,
+      agentName: agentName || null,
       lastSenderChange
     });
 
@@ -493,7 +494,7 @@
     return shorter.every((word) => longerSet.has(word));
   }
 
-  function matchConversationForText(text) {
+  function matchConversationForText(text, excludeSet, rowFullText) {
     const trimmed = (text || '').trim();
     if (!trimmed) return null;
 
@@ -510,12 +511,42 @@
       // name-based matching below can never find them. Fall back to an
       // exact, un-normalized comparison of the row text against each
       // conversation's raw name so these clients aren't left unmatched.
+      // Placeholder names like "." are common junk data, so several
+      // *different* clients can share the exact same (stripped-to-nothing)
+      // name. `excludeSet` stops every such row from collapsing onto the
+      // same first conversation, but with nothing else to go on it can still
+      // pair the wrong row with the wrong candidate whenever Map insertion
+      // order (when each conversation was first captured off the network)
+      // doesn't match the rows' on-screen order (typically sorted by
+      // activity) — a silent swap, not a miss. The row also shows the
+      // assigned agent's name (e.g. "RENATO DA SILVA") even when the
+      // client's own name doesn't, so when `rowFullText` is given, prefer
+      // whichever remaining candidate's `agentName` actually appears in it —
+      // genuinely disambiguating instead of guessing by order.
+      const candidates = [];
       for (const conversation of conversations.values()) {
+        if (excludeSet && excludeSet.has(conversation)) continue;
         if (conversation.name && conversation.name.trim() === trimmed) {
-          return conversation;
+          candidates.push(conversation);
         }
       }
-      return null;
+
+      if (!candidates.length) return null;
+
+      if (candidates.length > 1 && rowFullText) {
+        const normalizedRowText = normalizeNameForMatch(rowFullText);
+        const byAgent = candidates.find(
+          (c) => c.agentName && normalizedRowText.includes(normalizeNameForMatch(c.agentName))
+        );
+        if (byAgent) {
+          if (excludeSet) excludeSet.add(byAgent);
+          return byAgent;
+        }
+      }
+
+      const chosen = candidates[0];
+      if (excludeSet) excludeSet.add(chosen);
+      return chosen;
     }
 
     // An exact match must always win. Substring matches (handles truncated
@@ -597,10 +628,11 @@
     }
 
     const rows = getConversationRows();
+    const usedForPass = new Set();
     for (const row of rows) {
       const nameEl = row.querySelector(ROW_NAME_SELECTOR);
       const text = nameEl ? (nameEl.getAttribute('title') || nameEl.textContent || '') : '';
-      const conversation = matchConversationForText(text);
+      const conversation = matchConversationForText(text, usedForPass, row.textContent);
       const color = getConversationColor(conversation);
 
       if (!color) {
@@ -690,7 +722,7 @@
       return;
     }
 
-    registerConversation(phone, payload.name, payload.conversationId, payload.dateAnswer, payload.dateRequest, payload.lastSenderChange, payload.agentId, payload.queue);
+    registerConversation(phone, payload.name, payload.conversationId, payload.dateAnswer, payload.dateRequest, payload.lastSenderChange, payload.agentId, payload.queue, payload.agentName);
   }
 
   function installObserver() {
@@ -822,26 +854,31 @@
       queue: c.queue,
       channelPrefix: c.channelPrefix,
       agentId: c.agentId,
+      agentName: c.agentName,
       dateAnswer: c.dateAnswer ? c.dateAnswer.toISOString() : null,
       dateRequest: c.dateRequest ? c.dateRequest.toISOString() : null,
       lastSenderChange: c.lastSenderChange ? c.lastSenderChange.toISOString() : null,
       color: getConversationColor(c)
     })),
-    getRowsSnapshot: () => getConversationRows().map((row) => {
-      const nameEl = row.querySelector(ROW_NAME_SELECTOR);
-      const text = nameEl ? (nameEl.getAttribute('title') || nameEl.textContent || '') : '';
-      const conversation = matchConversationForText(text);
-      return {
-        rowText: text,
-        matched: !!conversation,
-        matchedKey: conversation ? (conversation.phone || conversation.name) : null,
-        queue: conversation ? conversation.queue : null,
-        agentId: conversation ? conversation.agentId : null,
-        dateAnswer: conversation?.dateAnswer ? conversation.dateAnswer.toISOString() : null,
-        dateRequest: conversation?.dateRequest ? conversation.dateRequest.toISOString() : null,
-        lastSenderChange: conversation?.lastSenderChange ? conversation.lastSenderChange.toISOString() : null,
-        color: conversation ? getConversationColor(conversation) : null
-      };
-    })
+    getRowsSnapshot: () => {
+      const usedForPass = new Set();
+      return getConversationRows().map((row) => {
+        const nameEl = row.querySelector(ROW_NAME_SELECTOR);
+        const text = nameEl ? (nameEl.getAttribute('title') || nameEl.textContent || '') : '';
+        const conversation = matchConversationForText(text, usedForPass, row.textContent);
+        return {
+          rowText: text,
+          matched: !!conversation,
+          matchedKey: conversation ? (conversation.phone || conversation.name) : null,
+          queue: conversation ? conversation.queue : null,
+          agentId: conversation ? conversation.agentId : null,
+          agentName: conversation ? conversation.agentName : null,
+          dateAnswer: conversation?.dateAnswer ? conversation.dateAnswer.toISOString() : null,
+          dateRequest: conversation?.dateRequest ? conversation.dateRequest.toISOString() : null,
+          lastSenderChange: conversation?.lastSenderChange ? conversation.lastSenderChange.toISOString() : null,
+          color: conversation ? getConversationColor(conversation) : null
+        };
+      });
+    }
   };
 })();

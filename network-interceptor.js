@@ -67,8 +67,14 @@
       return;
     }
 
-    // Need at least one queue-state field to classify the conversation.
-    if (!entry.dateAnswer && !entry.dateRequest && !entry.lastSenderChange && !entry.agentId) {
+    // Need at least one queue-state field to classify the conversation — a
+    // known `queue` (from the record's own `type`) counts on its own here:
+    // an Automático conversation the client never wrote back into legitimately
+    // has every date field null (dateAnswer/dateRequest/lastSenderChange/
+    // agentId), which used to make this look like nothing worth tracking and
+    // silently drop it — so it never got the "no lastSenderChange = stale"
+    // red marker, it just never got registered at all.
+    if (!entry.dateAnswer && !entry.dateRequest && !entry.lastSenderChange && !entry.agentId && !entry.queue) {
       return;
     }
 
@@ -83,6 +89,7 @@
         dateRequest: entry.dateRequest || null,
         lastSenderChange: entry.lastSenderChange || null,
         agentId: entry.agentId || null,
+        agentName: entry.agentName || null,
         queue: entry.queue || null
       }
     };
@@ -110,6 +117,12 @@
     const lastSenderChange = typeof record.lastSenderChange === 'string' ? record.lastSenderChange : null;
     const name = record.userName || null;
     const agentId = record.platformUserId || null;
+    // Shown in the row itself (below the client name/tag, e.g. "👤 RENATO DA
+    // SILVA") — used in content-script.js to disambiguate rows whose client
+    // name strips down to nothing (see matchConversationForText), since two
+    // different "." clients being worked by two different agents are still
+    // visually distinguishable that way even though their names aren't.
+    const agentName = record.platformUserName || null;
 
     const previous = cache.get(key);
     // Some updates for an already-known conversation (e.g. the lightweight
@@ -123,9 +136,9 @@
     // (still the sole source of truth) ever changes the classification.
     const queueType = QUEUE_TYPE_MAP[record.type] || (previous ? previous.queue : null);
 
-    const signature = `${dateAnswer}|${dateRequest}|${lastSenderChange}|${agentId}|${queueType || ''}`;
+    const signature = `${dateAnswer}|${dateRequest}|${lastSenderChange}|${agentId}|${agentName}|${queueType || ''}`;
     if (!previous || previous.signature !== signature) {
-      const entry = { phone, name, conversationId, dateAnswer, dateRequest, lastSenderChange, agentId, queue: queueType || null, signature };
+      const entry = { phone, name, conversationId, dateAnswer, dateRequest, lastSenderChange, agentId, agentName, queue: queueType || null, signature };
       cache.set(key, entry);
       postConversationUpdate(entry);
     }
