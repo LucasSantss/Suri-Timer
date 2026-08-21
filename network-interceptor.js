@@ -32,6 +32,17 @@
     return null;
   }
 
+  // Each conversation record carries its own `type` (0=Automático,
+  // 1=Esperando, 2=Atendimentos — confirmed in DevTools). This is the only
+  // source used to classify a conversation's queue: it's authoritative and
+  // per-record, unlike dateAnswer/dateRequest/agentId, which only imply the
+  // queue and can be misleading (e.g. platformUserId/agentId gets set as
+  // soon as an agent picks up a conversation, before their first reply, so a
+  // record can look like Atendimentos by that heuristic while `type` still
+  // correctly says Esperando). A record with no usable `type` gets no queue
+  // at all rather than a guessed one.
+  const QUEUE_TYPE_MAP = { 0: 'automatico', 1: 'esperando', 2: 'atendimento' };
+
   function isLikelyConversationPayload(value) {
     if (!value || typeof value !== 'object') {
       return false;
@@ -48,13 +59,6 @@
     return Object.values(value).some((child) => isLikelyConversationPayload(child));
   }
 
-  // A conversation's queue (Atendimentos / Automático / Esperando) isn't a
-  // field the API sends directly — it's implied by dateAnswer / dateRequest /
-  // agentId: dateAnswer present, or an agent already assigned (agentId, even
-  // before their first reply), means Atendimentos; otherwise dateRequest
-  // present means the client is queued waiting for a human (Esperando);
-  // otherwise it's still with the bot (Automático), where lastSenderChange
-  // (the client's last message) is what content-script.js uses instead.
   function postConversationUpdate(entry) {
     // WebChat visitors have no phone number at all — a name (or, at worst,
     // the platform's own conversationId) is still enough to match a queue
@@ -78,7 +82,8 @@
         dateAnswer: entry.dateAnswer || null,
         dateRequest: entry.dateRequest || null,
         lastSenderChange: entry.lastSenderChange || null,
-        agentId: entry.agentId || null
+        agentId: entry.agentId || null,
+        queue: entry.queue || null
       }
     };
 
@@ -104,19 +109,23 @@
     const dateRequest = typeof record.dateRequest === 'string' ? record.dateRequest : null;
     const lastSenderChange = typeof record.lastSenderChange === 'string' ? record.lastSenderChange : null;
     const name = record.userName || null;
-    // A conversation is moved into "Atendimentos" as soon as an agent picks
-    // it up (platformUserId gets set), which can happen before that agent's
-    // first reply — dateAnswer stays null in that window. Without this, those
-    // conversations were misclassified as still "esperando" (see
-    // classifyQueue in content-script.js), a queue the extension deliberately
-    // never colors, so they showed no identification at all despite already
-    // being worked.
     const agentId = record.platformUserId || null;
 
-    const signature = `${dateAnswer}|${dateRequest}|${lastSenderChange}|${agentId}`;
     const previous = cache.get(key);
+    // Some updates for an already-known conversation (e.g. the lightweight
+    // payload fired when a client replies and the row jumps to the top of
+    // the list) carry dateAnswer/lastSenderChange but no `type` at all. If
+    // we treated a missing `type` as "no queue" here, that partial update
+    // would wipe out the correct classification we already had from the
+    // last full list fetch, and it wouldn't come back until the queue tab
+    // was reloaded. So a missing `type` keeps whatever queue we last knew
+    // for this conversation instead of clearing it — only a *present* `type`
+    // (still the sole source of truth) ever changes the classification.
+    const queueType = QUEUE_TYPE_MAP[record.type] || (previous ? previous.queue : null);
+
+    const signature = `${dateAnswer}|${dateRequest}|${lastSenderChange}|${agentId}|${queueType || ''}`;
     if (!previous || previous.signature !== signature) {
-      const entry = { phone, name, conversationId, dateAnswer, dateRequest, lastSenderChange, agentId, signature };
+      const entry = { phone, name, conversationId, dateAnswer, dateRequest, lastSenderChange, agentId, queue: queueType || null, signature };
       cache.set(key, entry);
       postConversationUpdate(entry);
     }

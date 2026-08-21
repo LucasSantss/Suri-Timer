@@ -317,22 +317,19 @@
     return match ? match[1].toLowerCase() : null;
   }
 
-  // Which queue a conversation is in isn't sent directly by the API — it's
-  // implied by dateAnswer/dateRequest/agentId: a human already answered, or
-  // one is already assigned (agentId set, even before their first reply —
-  // dateAnswer can lag behind assignment), means Atendimentos; otherwise the
-  // client is queued waiting for one (Esperando); otherwise it's still with
-  // the bot (Automático).
-  function classifyQueue(dateAnswer, dateRequest, agentId) {
-    if (dateAnswer || agentId) return 'atendimento';
-    if (dateRequest) return 'esperando';
-    return 'automatico';
-  }
-
   // WebChat visitors have no phone at all — key on whatever identifier is
   // actually available (phone, then the platform's conversationId, then the
   // name itself) so those conversations don't get silently dropped.
-  function registerConversation(phone, name, conversationId, dateAnswerIso, dateRequestIso, lastSenderChangeIso, agentId) {
+  //
+  // `queue` comes solely from network-interceptor.js's QUEUE_TYPE_MAP
+  // (sourced from each record's own `type` field: 0=Automático, 1=Esperando,
+  // 2=Atendimentos) — the only reliable source. There's deliberately no
+  // fallback inference from dateAnswer/dateRequest/agentId: agentId gets set
+  // as soon as an agent picks up a conversation, before their first reply,
+  // which made a heuristic misclassify still-Esperando conversations as
+  // Atendimentos. A conversation with no usable `queue` gets no color at all
+  // (see getConversationColor) rather than a guessed one.
+  function registerConversation(phone, name, conversationId, dateAnswerIso, dateRequestIso, lastSenderChangeIso, agentId, queue) {
     const normalizedName = normalizeNameForMatch(name);
     const key = phone || conversationId || normalizedName;
     if (!key) {
@@ -347,7 +344,7 @@
       phone: phone || null,
       name: name || null,
       normalizedName,
-      queue: classifyQueue(dateAnswer, dateRequest, agentId),
+      queue: queue || null,
       channelPrefix: getChannelPrefix(conversationId),
       dateAnswer,
       dateRequest,
@@ -366,7 +363,13 @@
     if (__scheduleRefreshTimer) clearTimeout(__scheduleRefreshTimer);
     __scheduleRefreshTimer = setTimeout(() => {
       __scheduleRefreshTimer = null;
-      refreshAll();
+      // This is genuinely new data (a conversation just registered/changed),
+      // not a routine poll — bypass the queue-colors throttle below so it
+      // paints right away instead of possibly waiting up to 4s. Without this,
+      // conversations that arrived just after the first burst (still common
+      // seconds into a first load) sat uncolored until the throttle window
+      // happened to elapse, which read as slow/janky.
+      refreshAll(false, true);
     }, 150);
   }
 
@@ -394,9 +397,8 @@
     if (!conversation) return null;
 
     if (conversation.queue === 'atendimento') {
-      // An agent can be assigned (which is what puts the conversation in
-      // this queue, see classifyQueue) before dateAnswer is set — fall back
-      // to dateRequest (when the client first asked for a human) so those
+      // An agent can be assigned before dateAnswer is set — fall back to
+      // dateRequest (when the client first asked for a human) so those
       // conversations still get a time-based color instead of none.
       const referenceDate = conversation.dateAnswer || conversation.dateRequest;
       if (!referenceDate) return null;
@@ -408,7 +410,11 @@
     if (conversation.queue === 'automatico') {
       const staleHours = getAutomaticoStaleHours(conversation.channelPrefix);
       if (staleHours === Infinity) return AUTOMATICO_RECENT_COLOR;
-      if (!conversation.lastSenderChange) return null;
+      // No lastSenderChange at all means we can't tell how long the client
+      // has been waiting on the bot — treat that as stale (red) rather than
+      // leaving it uncolored, since an unknown wait is exactly the case this
+      // marker exists to flag.
+      if (!conversation.lastSenderChange) return AUTOMATICO_STALE_COLOR;
       const elapsedHours = (Date.now() - conversation.lastSenderChange.getTime()) / 3600000;
       return elapsedHours < staleHours ? AUTOMATICO_RECENT_COLOR : AUTOMATICO_STALE_COLOR;
     }
@@ -498,7 +504,19 @@
     }
 
     const normalizedText = normalizeNameForMatch(trimmed);
-    if (!normalizedText) return null;
+    if (!normalizedText) {
+      // Names made entirely of punctuation/symbols (a lone ".", an emoji
+      // with no letters/digits) strip down to nothing here — normal
+      // name-based matching below can never find them. Fall back to an
+      // exact, un-normalized comparison of the row text against each
+      // conversation's raw name so these clients aren't left unmatched.
+      for (const conversation of conversations.values()) {
+        if (conversation.name && conversation.name.trim() === trimmed) {
+          return conversation;
+        }
+      }
+      return null;
+    }
 
     // An exact match must always win. Substring matches (handles truncated
     // row text like "Letícia | MAXHAIRCABE..." matching the full "Letícia |
@@ -611,10 +629,10 @@
   // few seconds of staleness is never visible. refreshActiveConversationColor
   // (a single lookup for whichever conversation is open) stays on the fast
   // 1s cycle since it's cheap and its highlight should feel responsive.
-  const QUEUE_COLORS_REFRESH_INTERVAL_MS = 4000;
+  const QUEUE_COLORS_REFRESH_INTERVAL_MS = 400;
   let __lastQueueColorsRefresh = 0;
 
-  function refreshAll(forceTheme = false) {
+  function refreshAll(forceTheme = false, forceQueueColors = false) {
     // Cheap no-op on the plain 1s tick once the theme is already applied.
     // `forceTheme` is set when the DOM itself just changed (a conversation
     // was opened, new content rendered) so Dark Reader re-scans and themes
@@ -625,7 +643,11 @@
     refreshActiveConversationColor();
 
     const now = Date.now();
-    if (now - __lastQueueColorsRefresh >= QUEUE_COLORS_REFRESH_INTERVAL_MS) {
+    // `forceQueueColors` (set when scheduleRefresh fires for freshly
+    // registered/changed conversation data) always repaints — the throttle
+    // below is only meant to skip *redundant* repaints on the routine 1s/
+    // mutation-observer ticks, where colors can't have moved.
+    if (forceQueueColors || now - __lastQueueColorsRefresh >= QUEUE_COLORS_REFRESH_INTERVAL_MS) {
       __lastQueueColorsRefresh = now;
       refreshQueueColors();
     }
@@ -668,7 +690,7 @@
       return;
     }
 
-    registerConversation(phone, payload.name, payload.conversationId, payload.dateAnswer, payload.dateRequest, payload.lastSenderChange, payload.agentId);
+    registerConversation(phone, payload.name, payload.conversationId, payload.dateAnswer, payload.dateRequest, payload.lastSenderChange, payload.agentId, payload.queue);
   }
 
   function installObserver() {
@@ -703,15 +725,6 @@
     });
   }
 
-  async function loadConfig() {
-    if (!window.SuriTimerStorage) {
-      return;
-    }
-
-    config = await window.SuriTimerStorage.getConfig();
-    domainEnabled = isDomainEnabled(config);
-  }
-
   function applyConfig(nextConfig) {
     config = nextConfig || (window.SuriTimerStorage ? window.SuriTimerStorage.getDefaultConfig() : { thresholds: [{ minMinutes: 0, color: '#22c55e' }] });
     domainEnabled = isDomainEnabled(config);
@@ -744,14 +757,19 @@
   }
 
   async function init() {
-    await loadConfig();
-    if (!domainEnabled) {
+    // Paint immediately with defaults instead of blocking the very first
+    // render on chrome.storage.sync — it's a synced, cross-device area that
+    // can have real first-access latency (e.g. right after browser startup),
+    // and until it resolves nothing was drawn at all: no marker stripes, no
+    // highlight, no theme. Reconcile with the user's actual saved config
+    // (custom thresholds, per-domain toggle, theme) as soon as it arrives.
+    applyConfig(window.SuriTimerStorage ? window.SuriTimerStorage.getDefaultConfig() : null);
+
+    if (!window.SuriTimerStorage) {
       return;
     }
-    applyPageTheme(config?.theme, config?.themeBrightness, config?.themeContrast);
-    startColorLoop();
-    installObserver();
-    refreshAll();
+    const storedConfig = await window.SuriTimerStorage.getConfig();
+    applyConfig(storedConfig);
   }
 
   window.addEventListener('message', handleMessage, false);
