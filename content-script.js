@@ -358,18 +358,33 @@
 
   // A burst of network responses can register many conversations at once —
   // debounce so we repaint the queue once per burst instead of once per row.
+  // But the common case is a *single* client responding, not a burst — a
+  // flat trailing debounce made even that one lone update always wait out
+  // the full window before its color showed. Leading-edge: if nothing ran
+  // in the last 150ms, repaint immediately; only fall back to the trailing
+  // wait when updates are still arriving in quick succession (initial load,
+  // many conversations at once), so that case still gets coalesced.
   let __scheduleRefreshTimer = null;
+  let __scheduleRefreshLastRun = 0;
   function scheduleRefresh() {
     if (!domainEnabled) return;
-    if (__scheduleRefreshTimer) clearTimeout(__scheduleRefreshTimer);
-    __scheduleRefreshTimer = setTimeout(() => {
-      __scheduleRefreshTimer = null;
+
+    if (!__scheduleRefreshTimer && Date.now() - __scheduleRefreshLastRun >= 150) {
+      __scheduleRefreshLastRun = Date.now();
       // This is genuinely new data (a conversation just registered/changed),
       // not a routine poll — bypass the queue-colors throttle below so it
       // paints right away instead of possibly waiting up to 4s. Without this,
       // conversations that arrived just after the first burst (still common
       // seconds into a first load) sat uncolored until the throttle window
       // happened to elapse, which read as slow/janky.
+      refreshAll(false, true);
+      return;
+    }
+
+    if (__scheduleRefreshTimer) clearTimeout(__scheduleRefreshTimer);
+    __scheduleRefreshTimer = setTimeout(() => {
+      __scheduleRefreshTimer = null;
+      __scheduleRefreshLastRun = Date.now();
       refreshAll(false, true);
     }, 150);
   }
@@ -736,9 +751,9 @@
         clearTimeout(refreshTimer);
       }
 
-      // Our own colors refresh quickly (250ms) — cheap either way, since it
+      // Our own colors refresh quickly (150ms) — cheap either way, since it
       // no-ops when nothing actually changed.
-      refreshTimer = setTimeout(() => refreshAll(false), 250);
+      refreshTimer = setTimeout(() => refreshAll(false), 150);
 
       // Re-running Dark Reader is heavier, so it gets its own longer debounce
       // that coalesces bursts (e.g. several chat messages arriving in a row)
