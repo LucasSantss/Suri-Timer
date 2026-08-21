@@ -500,19 +500,35 @@
     const normalizedText = normalizeNameForMatch(trimmed);
     if (!normalizedText) return null;
 
-    // An exact/substring match (handles truncated row text like "Letícia |
-    // MAXHAIRCABE..." matching the full "Letícia | MAXHAIRCABELOS") is
-    // unambiguous and must always win — checked across every conversation
-    // first, so a merely-fuzzy match to some unrelated client (checked
-    // earlier only because of Map iteration order) can never shadow the
-    // correct exact match found later in the same pass.
+    // An exact match must always win. Substring matches (handles truncated
+    // row text like "Letícia | MAXHAIRCABE..." matching the full "Letícia |
+    // MAXHAIRCABELOS") are only unambiguous when there's just one candidate
+    // — a short, unrelated name like "Francisca" is also a substring of
+    // "Francisca Edna de Sousa Silva", so returning on the *first* substring
+    // hit (arbitrary Map iteration order) could shadow the real exact match
+    // for the full name with some other client's shorter one. Scan every
+    // conversation first and rank: exact > closest-length substring > fuzzy.
+    let exactMatch = null;
+    let bestSubstringMatch = null;
+    let bestSubstringDiff = Infinity;
     let fuzzyMatch = null;
+
     for (const conversation of conversations.values()) {
       const name = conversation.normalizedName;
       if (!name) continue;
 
-      if (name === normalizedText || name.includes(normalizedText) || normalizedText.includes(name)) {
-        return conversation;
+      if (name === normalizedText) {
+        exactMatch = conversation;
+        continue;
+      }
+
+      if (name.includes(normalizedText) || normalizedText.includes(name)) {
+        const diff = Math.abs(name.length - normalizedText.length);
+        if (diff < bestSubstringDiff) {
+          bestSubstringDiff = diff;
+          bestSubstringMatch = conversation;
+        }
+        continue;
       }
 
       if (!fuzzyMatch && namesLikelyMatch(normalizedText, name)) {
@@ -520,7 +536,7 @@
       }
     }
 
-    return fuzzyMatch;
+    return exactMatch || bestSubstringMatch || fuzzyMatch;
   }
 
   // A thin vertical stripe on the row's left edge, full height. It's its own
