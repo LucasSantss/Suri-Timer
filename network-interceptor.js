@@ -49,12 +49,12 @@
   }
 
   // A conversation's queue (Atendimentos / Automático / Esperando) isn't a
-  // field the API sends directly — it's implied by which of dateAnswer /
-  // dateRequest are set: dateAnswer present means a human already answered
-  // (Atendimentos); otherwise dateRequest present means the client is
-  // queued waiting for a human (Esperando); otherwise it's still with the
-  // bot (Automático), where lastSenderChange (the client's last message) is
-  // what content-script.js uses instead.
+  // field the API sends directly — it's implied by dateAnswer / dateRequest /
+  // agentId: dateAnswer present, or an agent already assigned (agentId, even
+  // before their first reply), means Atendimentos; otherwise dateRequest
+  // present means the client is queued waiting for a human (Esperando);
+  // otherwise it's still with the bot (Automático), where lastSenderChange
+  // (the client's last message) is what content-script.js uses instead.
   function postConversationUpdate(entry) {
     // WebChat visitors have no phone number at all — a name (or, at worst,
     // the platform's own conversationId) is still enough to match a queue
@@ -64,7 +64,7 @@
     }
 
     // Need at least one queue-state field to classify the conversation.
-    if (!entry.dateAnswer && !entry.dateRequest && !entry.lastSenderChange) {
+    if (!entry.dateAnswer && !entry.dateRequest && !entry.lastSenderChange && !entry.agentId) {
       return;
     }
 
@@ -77,7 +77,8 @@
         conversationId: entry.conversationId || null,
         dateAnswer: entry.dateAnswer || null,
         dateRequest: entry.dateRequest || null,
-        lastSenderChange: entry.lastSenderChange || null
+        lastSenderChange: entry.lastSenderChange || null,
+        agentId: entry.agentId || null
       }
     };
 
@@ -103,11 +104,19 @@
     const dateRequest = typeof record.dateRequest === 'string' ? record.dateRequest : null;
     const lastSenderChange = typeof record.lastSenderChange === 'string' ? record.lastSenderChange : null;
     const name = record.userName || null;
+    // A conversation is moved into "Atendimentos" as soon as an agent picks
+    // it up (platformUserId gets set), which can happen before that agent's
+    // first reply — dateAnswer stays null in that window. Without this, those
+    // conversations were misclassified as still "esperando" (see
+    // classifyQueue in content-script.js), a queue the extension deliberately
+    // never colors, so they showed no identification at all despite already
+    // being worked.
+    const agentId = record.platformUserId || null;
 
-    const signature = `${dateAnswer}|${dateRequest}|${lastSenderChange}`;
+    const signature = `${dateAnswer}|${dateRequest}|${lastSenderChange}|${agentId}`;
     const previous = cache.get(key);
     if (!previous || previous.signature !== signature) {
-      const entry = { phone, name, conversationId, dateAnswer, dateRequest, lastSenderChange, signature };
+      const entry = { phone, name, conversationId, dateAnswer, dateRequest, lastSenderChange, agentId, signature };
       cache.set(key, entry);
       postConversationUpdate(entry);
     }

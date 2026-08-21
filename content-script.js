@@ -318,11 +318,13 @@
   }
 
   // Which queue a conversation is in isn't sent directly by the API — it's
-  // implied by dateAnswer/dateRequest: a human already answered (Atendimentos),
-  // otherwise the client is queued waiting for one (Esperando), otherwise it's
-  // still with the bot (Automático).
-  function classifyQueue(dateAnswer, dateRequest) {
-    if (dateAnswer) return 'atendimento';
+  // implied by dateAnswer/dateRequest/agentId: a human already answered, or
+  // one is already assigned (agentId set, even before their first reply —
+  // dateAnswer can lag behind assignment), means Atendimentos; otherwise the
+  // client is queued waiting for one (Esperando); otherwise it's still with
+  // the bot (Automático).
+  function classifyQueue(dateAnswer, dateRequest, agentId) {
+    if (dateAnswer || agentId) return 'atendimento';
     if (dateRequest) return 'esperando';
     return 'automatico';
   }
@@ -330,7 +332,7 @@
   // WebChat visitors have no phone at all — key on whatever identifier is
   // actually available (phone, then the platform's conversationId, then the
   // name itself) so those conversations don't get silently dropped.
-  function registerConversation(phone, name, conversationId, dateAnswerIso, dateRequestIso, lastSenderChangeIso) {
+  function registerConversation(phone, name, conversationId, dateAnswerIso, dateRequestIso, lastSenderChangeIso, agentId) {
     const normalizedName = normalizeNameForMatch(name);
     const key = phone || conversationId || normalizedName;
     if (!key) {
@@ -345,9 +347,11 @@
       phone: phone || null,
       name: name || null,
       normalizedName,
-      queue: classifyQueue(dateAnswer, dateRequest),
+      queue: classifyQueue(dateAnswer, dateRequest, agentId),
       channelPrefix: getChannelPrefix(conversationId),
       dateAnswer,
+      dateRequest,
+      agentId: agentId || null,
       lastSenderChange
     });
 
@@ -390,8 +394,13 @@
     if (!conversation) return null;
 
     if (conversation.queue === 'atendimento') {
-      if (!conversation.dateAnswer) return null;
-      const elapsedMinutes = (Date.now() - conversation.dateAnswer.getTime()) / 60000;
+      // An agent can be assigned (which is what puts the conversation in
+      // this queue, see classifyQueue) before dateAnswer is set — fall back
+      // to dateRequest (when the client first asked for a human) so those
+      // conversations still get a time-based color instead of none.
+      const referenceDate = conversation.dateAnswer || conversation.dateRequest;
+      if (!referenceDate) return null;
+      const elapsedMinutes = (Date.now() - referenceDate.getTime()) / 60000;
       const rule = getActiveThreshold(elapsedMinutes, config?.thresholds || [{ minMinutes: 0, color: '#22c55e' }]);
       return rule.color || '#22c55e';
     }
@@ -643,7 +652,7 @@
       return;
     }
 
-    registerConversation(phone, payload.name, payload.conversationId, payload.dateAnswer, payload.dateRequest, payload.lastSenderChange);
+    registerConversation(phone, payload.name, payload.conversationId, payload.dateAnswer, payload.dateRequest, payload.lastSenderChange, payload.agentId);
   }
 
   function installObserver() {
@@ -778,7 +787,9 @@
       name: c.name,
       queue: c.queue,
       channelPrefix: c.channelPrefix,
+      agentId: c.agentId,
       dateAnswer: c.dateAnswer ? c.dateAnswer.toISOString() : null,
+      dateRequest: c.dateRequest ? c.dateRequest.toISOString() : null,
       lastSenderChange: c.lastSenderChange ? c.lastSenderChange.toISOString() : null,
       color: getConversationColor(c)
     })),
@@ -791,7 +802,9 @@
         matched: !!conversation,
         matchedKey: conversation ? (conversation.phone || conversation.name) : null,
         queue: conversation ? conversation.queue : null,
+        agentId: conversation ? conversation.agentId : null,
         dateAnswer: conversation?.dateAnswer ? conversation.dateAnswer.toISOString() : null,
+        dateRequest: conversation?.dateRequest ? conversation.dateRequest.toISOString() : null,
         lastSenderChange: conversation?.lastSenderChange ? conversation.lastSenderChange.toISOString() : null,
         color: conversation ? getConversationColor(conversation) : null
       };
