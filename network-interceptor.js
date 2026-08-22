@@ -2,6 +2,7 @@
   const MESSAGE_NAMESPACE = 'suri-timer-ext';
   const MAX_PHONE_DIGITS = 15;
   const cache = new Map();
+  const templateCache = new Map(); // template id -> category
 
   function normalizePhone(value) {
     return String(value ?? '').replace(/\D/g, '');
@@ -43,20 +44,24 @@
   // at all rather than a guessed one.
   const QUEUE_TYPE_MAP = { 0: 'automatico', 1: 'esperando', 2: 'atendimento' };
 
-  function isLikelyConversationPayload(value) {
+  function isLikelyTrackedPayload(value) {
     if (!value || typeof value !== 'object') {
       return false;
     }
 
     if (Array.isArray(value)) {
-      return value.some((item) => isLikelyConversationPayload(item));
+      return value.some((item) => isLikelyTrackedPayload(item));
     }
 
     if ('dateAnswer' in value || 'dateRequest' in value) {
       return true;
     }
 
-    return Object.values(value).some((child) => isLikelyConversationPayload(child));
+    if ('isWhatsappTemplate' in value && 'category' in value) {
+      return true;
+    }
+
+    return Object.values(value).some((child) => isLikelyTrackedPayload(child));
   }
 
   function postConversationUpdate(entry) {
@@ -95,6 +100,33 @@
     };
 
     window.postMessage(message, window.location.origin);
+  }
+
+  function postTemplateUpdate(id, category) {
+    window.postMessage({
+      source: MESSAGE_NAMESPACE,
+      type: 'TEMPLATE_UPDATE',
+      payload: { id, category: category || null }
+    }, window.location.origin);
+  }
+
+  // Records from the Modelos de Mensagem (templateMessage/list) endpoint —
+  // `isWhatsappTemplate` + `category` together are specific enough to this
+  // payload shape that they're safe to key detection on directly, the same
+  // way conversation records are detected by `dateAnswer` above.
+  function storeTemplate(record) {
+    const id = record.id;
+    if (!id || typeof id !== 'string') {
+      return;
+    }
+
+    const category = record.category || null;
+    if (templateCache.get(id) === category) {
+      return;
+    }
+
+    templateCache.set(id, category);
+    postTemplateUpdate(id, category);
   }
 
   function storeConversation(record) {
@@ -160,6 +192,10 @@
       storeConversation(value);
     }
 
+    if ('isWhatsappTemplate' in value && 'category' in value) {
+      storeTemplate(value);
+    }
+
     for (const child of Object.values(value)) {
       walkObject(child);
     }
@@ -177,13 +213,16 @@
       return;
     }
 
-    if (isLikelyConversationPayload(payload)) {
+    if (isLikelyTrackedPayload(payload)) {
       walkObject(payload);
     }
   }
 
   function processTextBody(body) {
-    if (!body || typeof body !== 'string' || !body.includes('dateAnswer')) {
+    if (!body || typeof body !== 'string') {
+      return;
+    }
+    if (!body.includes('dateAnswer') && !body.includes('isWhatsappTemplate')) {
       return;
     }
 
@@ -305,6 +344,9 @@
 
     for (const entry of cache.values()) {
       postConversationUpdate(entry);
+    }
+    for (const [id, category] of templateCache.entries()) {
+      postTemplateUpdate(id, category);
     }
   });
 })();

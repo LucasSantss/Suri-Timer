@@ -11,6 +11,8 @@ const state = {
   theme: 'light',
   themeBrightness: 100,
   themeContrast: 100,
+  themeLightBrightness: 100,
+  themeLightContrast: 100,
   thresholds: [
     { minMinutes: 0, color: '#22c55e' },
     { minMinutes: 5, color: '#facc15' },
@@ -26,17 +28,23 @@ function updateThemeButtons() {
   document.querySelectorAll('.theme-option').forEach((button) => {
     button.classList.toggle('active', button.dataset.theme === state.theme);
   });
+  document.querySelectorAll('.theme-settings').forEach((section) => {
+    section.classList.toggle('active', section.dataset.themeSettings === state.theme);
+  });
 }
 
 function updateSliders() {
-  const brightness = document.getElementById('brightness');
-  const contrast = document.getElementById('contrast');
-  const brightnessValue = document.getElementById('brightnessValue');
-  const contrastValue = document.getElementById('contrastValue');
-  if (brightness) brightness.value = state.themeBrightness;
-  if (contrast) contrast.value = state.themeContrast;
-  if (brightnessValue) brightnessValue.textContent = `${state.themeBrightness}%`;
-  if (contrastValue) contrastValue.textContent = `${state.themeContrast}%`;
+  [
+    ['brightness', 'brightnessValue', state.themeBrightness],
+    ['contrast', 'contrastValue', state.themeContrast],
+    ['lightBrightness', 'lightBrightnessValue', state.themeLightBrightness],
+    ['lightContrast', 'lightContrastValue', state.themeLightContrast]
+  ].forEach(([inputId, labelId, value]) => {
+    const input = document.getElementById(inputId);
+    const label = document.getElementById(labelId);
+    if (input) input.value = value;
+    if (label) label.textContent = `${value}%`;
+  });
 }
 
 function updatePreview() {
@@ -187,6 +195,8 @@ function loadConfig() {
     state.theme = config.theme || 'light';
     state.themeBrightness = config.themeBrightness ?? 100;
     state.themeContrast = config.themeContrast ?? 100;
+    state.themeLightBrightness = config.themeLightBrightness ?? 100;
+    state.themeLightContrast = config.themeLightContrast ?? 100;
     state.thresholds = (config.thresholds && config.thresholds.length)
       ? config.thresholds
       : [DEFAULT_RULE];
@@ -218,6 +228,8 @@ function saveConfig(options = {}) {
     theme: state.theme,
     themeBrightness: state.themeBrightness,
     themeContrast: state.themeContrast,
+    themeLightBrightness: state.themeLightBrightness,
+    themeLightContrast: state.themeLightContrast,
     thresholds: state.thresholds,
     domains: state.domains
   };
@@ -266,6 +278,22 @@ document.getElementById('contrast').addEventListener('input', (event) => {
   updateSliders();
 });
 document.getElementById('contrast').addEventListener('change', () => {
+  saveConfig({ message: 'Contraste ajustado.' });
+});
+
+document.getElementById('lightBrightness').addEventListener('input', (event) => {
+  state.themeLightBrightness = Number(event.target.value);
+  updateSliders();
+});
+document.getElementById('lightBrightness').addEventListener('change', () => {
+  saveConfig({ message: 'Brilho ajustado.' });
+});
+
+document.getElementById('lightContrast').addEventListener('input', (event) => {
+  state.themeLightContrast = Number(event.target.value);
+  updateSliders();
+});
+document.getElementById('lightContrast').addEventListener('change', () => {
   saveConfig({ message: 'Contraste ajustado.' });
 });
 

@@ -1,6 +1,7 @@
 (() => {
   const MESSAGE_NAMESPACE = 'suri-timer-ext';
   const conversations = new Map(); // normalizedPhone -> { phone, name, queue, dateAnswer: Date|null, lastSenderChange: Date|null }
+  const templateCategories = new Map(); // template id (e.g. "cb57489123:template:93787057") -> category|null
 
   let config = null;
   let domainEnabled = true;
@@ -104,6 +105,17 @@
         transition: background-color 240ms ease, box-shadow 240ms ease, color 240ms ease;
       }
 
+      .suri-category-badge {
+        display: inline-block !important;
+        padding: 2px 9px !important;
+        border-radius: 999px !important;
+        font-size: 11px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.02em !important;
+        line-height: 1.7 !important;
+        white-space: nowrap !important;
+      }
+
       [data-suri-marker] {
         position: absolute !important;
         top: 0 !important;
@@ -174,14 +186,43 @@
 
   let __lastAppliedTheme = null;
 
+  // Picks whichever pair of sliders is relevant to the currently selected
+  // theme — light and dark keep independent brightness/contrast values so
+  // switching themes doesn't clobber either one's saved adjustment.
+  function getThemeBrightnessContrast(cfg) {
+    if (!cfg) return { brightness: 100, contrast: 100 };
+    if (cfg.theme === 'dark') {
+      return { brightness: cfg.themeBrightness, contrast: cfg.themeContrast };
+    }
+    return { brightness: cfg.themeLightBrightness, contrast: cfg.themeLightContrast };
+  }
+
+  // Light mode never inverts colors (that's what Dark Reader is for), so
+  // brightness/contrast there is a plain CSS filter instead — cheap, and
+  // independent of whether Dark Reader loaded at all. Applied to <body>,
+  // not <html>: Chromium has a long-standing quirk where `filter` set on
+  // the root <html> element renders no visible effect at all, even though
+  // the style is applied without error — body (or any other element) works
+  // correctly.
+  function applyLightFilter(brightness, contrast) {
+    const target = document.body;
+    if (!target) return;
+
+    const b = brightness ?? 100;
+    const c = contrast ?? 100;
+    if (b === 100 && c === 100) {
+      target.style.removeProperty('filter');
+    } else {
+      target.style.filter = `brightness(${b}%) contrast(${c}%)`;
+    }
+  }
+
   // `force` re-runs DarkReader.enable() even when the theme/brightness/
   // contrast haven't changed — used when the page's own DOM changed (e.g.
   // opening a conversation renders a new message thread + details panel)
   // so that newly-inserted content gets themed too, not just what existed
   // when "Escuro" was first turned on.
   function applyPageTheme(theme, brightness, contrast, force = false) {
-    if (!window.DarkReader) return;
-
     const signature = `${theme}|${brightness ?? 100}|${contrast ?? 100}`;
     if (!force && signature === __lastAppliedTheme) {
       return;
@@ -192,12 +233,16 @@
     document.documentElement.classList.toggle('suri-dark-mode-fallback', theme === 'dark');
 
     if (theme === 'dark') {
-      window.DarkReader.enable(
-        { brightness: brightness ?? 100, contrast: contrast ?? 100 },
-        DARK_READER_FIXES
-      );
+      applyLightFilter(100, 100);
+      if (window.DarkReader) {
+        window.DarkReader.enable(
+          { brightness: brightness ?? 100, contrast: contrast ?? 100 },
+          DARK_READER_FIXES
+        );
+      }
     } else {
-      window.DarkReader.disable();
+      if (window.DarkReader) window.DarkReader.disable();
+      applyLightFilter(brightness, contrast);
     }
   }
 
@@ -207,7 +252,8 @@
     if (__themeForceTimer) clearTimeout(__themeForceTimer);
     __themeForceTimer = setTimeout(() => {
       __themeForceTimer = null;
-      applyPageTheme(config.theme, config.themeBrightness, config.themeContrast, true);
+      const { brightness, contrast } = getThemeBrightnessContrast(config);
+      applyPageTheme(config.theme, brightness, contrast, true);
     }, 1200);
   }
 
@@ -669,6 +715,78 @@
     }
   }
 
+  // --- Template category badges (Configurações / Modelos de Mensagem) ---
+  // Each card's delete button carries `name="deleteTemplate-<id>"`, where
+  // <id> (e.g. "cb57489123:template:93787057") matches the `id` field on the
+  // templateMessage/list API record network-interceptor.js reads `category`
+  // off of — so the button name is used directly as the lookup key instead
+  // of parsing the "Identificador" text.
+  const TEMPLATE_DELETE_BUTTON_SELECTOR = 'button[name^="deleteTemplate-"]';
+  const TEMPLATE_ID_PREFIX = 'deleteTemplate-';
+
+  const CATEGORY_COLORS = {
+    MARKETING: '#8b5cf6',
+    UTILITY: '#0ea5e9',
+    AUTHENTICATION: '#f59e0b'
+  };
+
+  function getCategoryColor(category) {
+    return CATEGORY_COLORS[category] || '#64748b';
+  }
+
+  function styleTemplateBadge(container, category) {
+    let badge = container.querySelector(':scope > [data-suri-category-badge]');
+
+    if (!category) {
+      if (badge) badge.remove();
+      return;
+    }
+
+    const label = String(category).toUpperCase();
+    if (badge && badge.dataset.suriCategory === label) {
+      return;
+    }
+
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.setAttribute('data-suri-category-badge', 'true');
+      badge.className = 'suri-category-badge';
+      container.appendChild(badge);
+    }
+
+    const color = getCategoryColor(label);
+    badge.dataset.suriCategory = label;
+    badge.textContent = label;
+    badge.style.backgroundColor = hexToRgba(color, 0.16);
+    badge.style.color = color;
+  }
+
+  function refreshTemplateCards() {
+    if (!domainEnabled || !templateCategories.size) return;
+
+    const buttons = document.querySelectorAll(TEMPLATE_DELETE_BUTTON_SELECTOR);
+    for (const button of buttons) {
+      const id = (button.getAttribute('name') || '').slice(TEMPLATE_ID_PREFIX.length);
+      if (!id || !templateCategories.has(id)) continue;
+
+      const actions = button.closest('.actions');
+      const container = actions ? actions.querySelector('.approval-container') : null;
+      if (!container) continue;
+
+      try {
+        styleTemplateBadge(container, templateCategories.get(id));
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  function clearAllTemplateBadges() {
+    for (const badge of document.querySelectorAll('[data-suri-category-badge]')) {
+      badge.remove();
+    }
+  }
+
   // refreshQueueColors() is O(rows × tracked conversations) — with Automático
   // now tracking every conversation (not just the handful active in
   // Atendimentos), repainting the whole visible list on every single 1s tick
@@ -685,9 +803,11 @@
     // was opened, new content rendered) so Dark Reader re-scans and themes
     // whatever is new — it doesn't always catch that on its own.
     if (domainEnabled && config) {
-      applyPageTheme(config.theme, config.themeBrightness, config.themeContrast, forceTheme);
+      const { brightness, contrast } = getThemeBrightnessContrast(config);
+      applyPageTheme(config.theme, brightness, contrast, forceTheme);
     }
     refreshActiveConversationColor();
+    refreshTemplateCards();
 
     const now = Date.now();
     // `forceQueueColors` (set when scheduleRefresh fires for freshly
@@ -721,6 +841,15 @@
     }
 
     if (!event.data || event.data.source !== MESSAGE_NAMESPACE) {
+      return;
+    }
+
+    if (event.data.type === 'TEMPLATE_UPDATE') {
+      const { id, category } = event.data.payload || {};
+      if (id) {
+        templateCategories.set(id, category || null);
+        scheduleRefresh();
+      }
       return;
     }
 
@@ -779,12 +908,14 @@
     if (!domainEnabled) {
       clearHighlight();
       clearAllRowStyles();
+      clearAllTemplateBadges();
       applyPageTheme('light');
       stopColorLoop();
       return;
     }
 
-    applyPageTheme(config.theme, config.themeBrightness, config.themeContrast);
+    const { brightness, contrast } = getThemeBrightnessContrast(config);
+    applyPageTheme(config.theme, brightness, contrast);
     startColorLoop();
     installObserver();
     refreshAll();

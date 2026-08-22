@@ -221,6 +221,14 @@
         display: block;
       }
 
+      .theme-settings {
+        display: none;
+      }
+
+      .theme-settings.active {
+        display: block;
+      }
+
       .domain-row {
         display: flex;
         align-items: center;
@@ -381,7 +389,20 @@
               </div>
             </div>
 
-            <div class="section">
+            <div class="section theme-settings" data-theme-settings="light">
+              <h2>Ajustes do tema claro</h2>
+              <p class="help-text">Aplica um filtro de brilho/contraste na página, sem inverter as cores. Só afetam a página quando o tema Claro está ativo.</p>
+              <div class="slider-row">
+                <label>Brilho <span id="lightBrightnessValue">100%</span></label>
+                <input type="range" id="lightBrightness" min="50" max="150" step="5" value="100" />
+              </div>
+              <div class="slider-row">
+                <label>Contraste <span id="lightContrastValue">100%</span></label>
+                <input type="range" id="lightContrast" min="50" max="150" step="5" value="100" />
+              </div>
+            </div>
+
+            <div class="section theme-settings" data-theme-settings="dark">
               <h2>Ajustes do tema escuro</h2>
               <p class="help-text">Só afetam a página quando o tema Escuro está ativo.</p>
               <div class="slider-row">
