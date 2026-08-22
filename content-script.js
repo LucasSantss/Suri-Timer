@@ -308,6 +308,20 @@
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
+  // Each row's own timestamp element has a title like "Última mensagem em
+  // 21/08/2026 17:46" — parsed explicitly (dd/mm/yyyy) rather than handed to
+  // `new Date(...)`, whose parsing of that format is locale-dependent and
+  // unreliable. Used only as a last-resort disambiguator in
+  // matchConversationForText (see ROW_DATE_SELECTOR), so returning null on
+  // anything unexpected is fine — it just skips that extra signal.
+  function parseRowTimestamp(title) {
+    const match = /(\d{2})\/(\d{2})\/(\d{4})\D+(\d{2}):(\d{2})/.exec(title || '');
+    if (!match) return null;
+    const [, day, month, year, hour, minute] = match;
+    const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
   // conversationId is like "wp447721785081837:5545998280751" (WhatsApp),
   // "wc...", "fb...", "ig..." — the letters prefix identifies the channel,
   // which the Automático staleness rule below depends on.
@@ -329,7 +343,7 @@
   // which made a heuristic misclassify still-Esperando conversations as
   // Atendimentos. A conversation with no usable `queue` gets no color at all
   // (see getConversationColor) rather than a guessed one.
-  function registerConversation(phone, name, conversationId, dateAnswerIso, dateRequestIso, lastSenderChangeIso, agentId, queue, agentName) {
+  function registerConversation(phone, name, conversationId, dateAnswerIso, dateRequestIso, lastSenderChangeIso, agentId, queue, agentName, lastActivityIso) {
     const normalizedName = normalizeNameForMatch(name);
     const key = phone || conversationId || normalizedName;
     if (!key) {
@@ -339,6 +353,7 @@
     const dateAnswer = parseDateOrNull(dateAnswerIso);
     const dateRequest = parseDateOrNull(dateRequestIso);
     const lastSenderChange = parseDateOrNull(lastSenderChangeIso);
+    const lastActivity = parseDateOrNull(lastActivityIso);
 
     conversations.set(key, {
       phone: phone || null,
@@ -350,7 +365,8 @@
       dateRequest,
       agentId: agentId || null,
       agentName: agentName || null,
-      lastSenderChange
+      lastSenderChange,
+      lastActivity
     });
 
     scheduleRefresh();
@@ -476,6 +492,9 @@
   // (or phone, when no name is set) lives in a child ".messaginglist-name".
   const ROW_SELECTOR = 'tr.messaginguseritemgrid';
   const ROW_NAME_SELECTOR = '.messaginglist-name';
+  // `title` holds the full "Última mensagem em dd/mm/yyyy HH:mm", while the
+  // element's own text is just the truncated "HH:mm".
+  const ROW_DATE_SELECTOR = '[name="date"]';
 
   function getConversationRows() {
     return Array.from(document.querySelectorAll(ROW_SELECTOR));
@@ -509,7 +528,7 @@
     return shorter.every((word) => longerSet.has(word));
   }
 
-  function matchConversationForText(text, excludeSet, rowFullText) {
+  function matchConversationForText(text, excludeSet, rowFullText, rowTimestamp) {
     const trimmed = (text || '').trim();
     if (!trimmed) return null;
 
@@ -526,40 +545,59 @@
       // name-based matching below can never find them. Fall back to an
       // exact, un-normalized comparison of the row text against each
       // conversation's raw name so these clients aren't left unmatched.
-      // Placeholder names like "." are common junk data, so several
-      // *different* clients can share the exact same (stripped-to-nothing)
-      // name. `excludeSet` stops every such row from collapsing onto the
-      // same first conversation, but with nothing else to go on it can still
-      // pair the wrong row with the wrong candidate whenever Map insertion
-      // order (when each conversation was first captured off the network)
-      // doesn't match the rows' on-screen order (typically sorted by
-      // activity) — a silent swap, not a miss. The row also shows the
-      // assigned agent's name (e.g. "RENATO DA SILVA") even when the
-      // client's own name doesn't, so when `rowFullText` is given, prefer
-      // whichever remaining candidate's `agentName` actually appears in it —
-      // genuinely disambiguating instead of guessing by order.
-      const candidates = [];
+      // Placeholder names like "." or a lone emoji are common junk data, so
+      // several *different* clients can share the exact same
+      // (stripped-to-nothing) name. `excludeSet` stops every such row from
+      // collapsing onto the same first conversation, but with nothing else
+      // to go on it can still pair the wrong row with the wrong candidate,
+      // since Map insertion order (when each conversation was first captured
+      // off the network) doesn't necessarily match the rows' on-screen order
+      // — a silent swap, not a miss. Narrow down with two extra signals also
+      // visible on the row, each applied only when it actually narrows the
+      // field (an agent can have several such blank-named chats open at
+      // once, so agent name alone doesn't always finish the job):
+      //   1. the assigned agent's name (e.g. "RENATO DA SILVA");
+      //   2. the "Última mensagem" timestamp — two different conversations
+      //      landing on the very same displayed minute is rare even when
+      //      they share both name and agent.
+      let pool = [];
       for (const conversation of conversations.values()) {
         if (excludeSet && excludeSet.has(conversation)) continue;
         if (conversation.name && conversation.name.trim() === trimmed) {
-          candidates.push(conversation);
+          pool.push(conversation);
         }
       }
 
-      if (!candidates.length) return null;
+      if (!pool.length) return null;
 
-      if (candidates.length > 1 && rowFullText) {
+      if (pool.length > 1 && rowFullText) {
         const normalizedRowText = normalizeNameForMatch(rowFullText);
-        const byAgent = candidates.find(
+        const agentFiltered = pool.filter(
           (c) => c.agentName && normalizedRowText.includes(normalizeNameForMatch(c.agentName))
         );
-        if (byAgent) {
-          if (excludeSet) excludeSet.add(byAgent);
-          return byAgent;
+        if (agentFiltered.length) pool = agentFiltered;
+      }
+
+      if (pool.length > 1 && rowTimestamp) {
+        let closest = null;
+        let closestDiff = Infinity;
+        for (const c of pool) {
+          const ts = c.lastActivity || c.lastSenderChange || c.dateAnswer || c.dateRequest;
+          if (!ts) continue;
+          const diff = Math.abs(ts.getTime() - rowTimestamp.getTime());
+          if (diff < closestDiff) {
+            closestDiff = diff;
+            closest = c;
+          }
+        }
+        // The row only displays HH:mm — up to ~90s of slack still counts as
+        // "the same moment" once seconds are lost to that truncation.
+        if (closest && closestDiff <= 90000) {
+          pool = [closest];
         }
       }
 
-      const chosen = candidates[0];
+      const chosen = pool[0];
       if (excludeSet) excludeSet.add(chosen);
       return chosen;
     }
@@ -647,7 +685,9 @@
     for (const row of rows) {
       const nameEl = row.querySelector(ROW_NAME_SELECTOR);
       const text = nameEl ? (nameEl.getAttribute('title') || nameEl.textContent || '') : '';
-      const conversation = matchConversationForText(text, usedForPass, row.textContent);
+      const dateEl = row.querySelector(ROW_DATE_SELECTOR);
+      const rowTimestamp = dateEl ? parseRowTimestamp(dateEl.getAttribute('title')) : null;
+      const conversation = matchConversationForText(text, usedForPass, row.textContent, rowTimestamp);
       const color = getConversationColor(conversation);
 
       if (!color) {
@@ -737,7 +777,7 @@
       return;
     }
 
-    registerConversation(phone, payload.name, payload.conversationId, payload.dateAnswer, payload.dateRequest, payload.lastSenderChange, payload.agentId, payload.queue, payload.agentName);
+    registerConversation(phone, payload.name, payload.conversationId, payload.dateAnswer, payload.dateRequest, payload.lastSenderChange, payload.agentId, payload.queue, payload.agentName, payload.lastActivity);
   }
 
   function installObserver() {
@@ -873,6 +913,7 @@
       dateAnswer: c.dateAnswer ? c.dateAnswer.toISOString() : null,
       dateRequest: c.dateRequest ? c.dateRequest.toISOString() : null,
       lastSenderChange: c.lastSenderChange ? c.lastSenderChange.toISOString() : null,
+      lastActivity: c.lastActivity ? c.lastActivity.toISOString() : null,
       color: getConversationColor(c)
     })),
     getRowsSnapshot: () => {
@@ -880,9 +921,12 @@
       return getConversationRows().map((row) => {
         const nameEl = row.querySelector(ROW_NAME_SELECTOR);
         const text = nameEl ? (nameEl.getAttribute('title') || nameEl.textContent || '') : '';
-        const conversation = matchConversationForText(text, usedForPass, row.textContent);
+        const dateEl = row.querySelector(ROW_DATE_SELECTOR);
+        const rowTimestamp = dateEl ? parseRowTimestamp(dateEl.getAttribute('title')) : null;
+        const conversation = matchConversationForText(text, usedForPass, row.textContent, rowTimestamp);
         return {
           rowText: text,
+          rowTimestamp: rowTimestamp ? rowTimestamp.toISOString() : null,
           matched: !!conversation,
           matchedKey: conversation ? (conversation.phone || conversation.name) : null,
           queue: conversation ? conversation.queue : null,
@@ -891,6 +935,7 @@
           dateAnswer: conversation?.dateAnswer ? conversation.dateAnswer.toISOString() : null,
           dateRequest: conversation?.dateRequest ? conversation.dateRequest.toISOString() : null,
           lastSenderChange: conversation?.lastSenderChange ? conversation.lastSenderChange.toISOString() : null,
+          lastActivity: conversation?.lastActivity ? conversation.lastActivity.toISOString() : null,
           color: conversation ? getConversationColor(conversation) : null
         };
       });

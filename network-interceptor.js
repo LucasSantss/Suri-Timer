@@ -74,7 +74,7 @@
     // agentId), which used to make this look like nothing worth tracking and
     // silently drop it — so it never got the "no lastSenderChange = stale"
     // red marker, it just never got registered at all.
-    if (!entry.dateAnswer && !entry.dateRequest && !entry.lastSenderChange && !entry.agentId && !entry.queue) {
+    if (!entry.dateAnswer && !entry.dateRequest && !entry.lastSenderChange && !entry.lastActivity && !entry.agentId && !entry.queue) {
       return;
     }
 
@@ -88,6 +88,7 @@
         dateAnswer: entry.dateAnswer || null,
         dateRequest: entry.dateRequest || null,
         lastSenderChange: entry.lastSenderChange || null,
+        lastActivity: entry.lastActivity || null,
         agentId: entry.agentId || null,
         agentName: entry.agentName || null,
         queue: entry.queue || null
@@ -115,6 +116,12 @@
     const dateAnswer = typeof record.dateAnswer === 'string' ? record.dateAnswer : null;
     const dateRequest = typeof record.dateRequest === 'string' ? record.dateRequest : null;
     const lastSenderChange = typeof record.lastSenderChange === 'string' ? record.lastSenderChange : null;
+    // Same value the row shows as "Última mensagem em ..." — used in
+    // content-script.js as a last-resort disambiguator (nearest timestamp)
+    // for rows whose name AND agent both fail to tell two conversations
+    // apart (e.g. one agent handling several simultaneously-open chats that
+    // all display an emoji-only name).
+    const lastActivity = typeof record.lastActivity === 'string' ? record.lastActivity : null;
     const name = record.userName || null;
     const agentId = record.platformUserId || null;
     // Shown in the row itself (below the client name/tag, e.g. "👤 RENATO DA
@@ -136,9 +143,9 @@
     // (still the sole source of truth) ever changes the classification.
     const queueType = QUEUE_TYPE_MAP[record.type] || (previous ? previous.queue : null);
 
-    const signature = `${dateAnswer}|${dateRequest}|${lastSenderChange}|${agentId}|${agentName}|${queueType || ''}`;
+    const signature = `${dateAnswer}|${dateRequest}|${lastSenderChange}|${lastActivity}|${agentId}|${agentName}|${queueType || ''}`;
     if (!previous || previous.signature !== signature) {
-      const entry = { phone, name, conversationId, dateAnswer, dateRequest, lastSenderChange, agentId, agentName, queue: queueType || null, signature };
+      const entry = { phone, name, conversationId, dateAnswer, dateRequest, lastSenderChange, lastActivity, agentId, agentName, queue: queueType || null, signature };
       cache.set(key, entry);
       postConversationUpdate(entry);
     }
