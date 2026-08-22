@@ -1150,6 +1150,17 @@
   // Usage in the page console:
   //   copy(JSON.stringify(window.__suriTimerDebug.getRowsSnapshot(), null, 2))
   window.__suriTimerDebug = {
+    getShopState: () => ({
+      domainEnabled,
+      showShopInfo: config ? config.showShopInfo : null,
+      products: Array.from(shopProductsById.entries()),
+      categories: Array.from(shopCategoriesById.entries()),
+      productNameElsFound: document.querySelectorAll(SHOP_PRODUCT_NAME_SELECTOR).length,
+      categoryNameElsFound: document.querySelectorAll(SHOP_CATEGORY_NAME_SELECTOR).length,
+      firstProductRowText: document.querySelector(SHOP_PRODUCT_NAME_SELECTOR)
+        ? getNameTextExcludingBadge(document.querySelector(SHOP_PRODUCT_NAME_SELECTOR))
+        : null
+    }),
     getConfig: () => ({
       domainEnabled,
       config,

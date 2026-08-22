@@ -1,6 +1,7 @@
 (() => {
   const MESSAGE_NAMESPACE = 'suri-timer-ext';
   const MAX_PHONE_DIGITS = 15;
+  const RECORD_SEPARATOR = String.fromCharCode(30); // SignalR JSON Hub Protocol message terminator
   const cache = new Map();
   const templateCache = new Map(); // template id -> category
   const shopProductCache = new Map(); // product id -> {sku, name}
@@ -261,6 +262,14 @@
       storeTemplate(value);
     }
 
+    if ('sku' in value && 'shopId' in value) {
+      storeShopProduct(value);
+    }
+
+    if ('children' in value && 'shopId' in value) {
+      storeShopCategory(value);
+    }
+
     for (const child of Object.values(value)) {
       walkObject(child);
     }
@@ -283,19 +292,55 @@
     }
   }
 
+  // SignalR's JSON Hub Protocol terminates every message with a trailing
+  // Record Separator and can pack several messages into one WebSocket frame
+  // (e.g. a keep-alive ping alongside a real data push). A plain fetch/XHR
+  // body never contains this character, so that common case is untouched:
+  // one segment, same gate + parse as before.
   function processTextBody(body) {
     if (!body || typeof body !== 'string') {
       return;
     }
+
+    if (body.indexOf(RECORD_SEPARATOR) === -1) {
+      processJsonSegment(body);
+      return;
+    }
+
+    // Cheap pre-filter over the whole frame before paying for split() + a
+    // loop: if none of the markers appear anywhere in it, no individual
+    // segment can contain them either. Keeps the very frequent, tiny
+    // SignalR keep-alive pings essentially free.
     if (!body.includes('dateAnswer') && !body.includes('isWhatsappTemplate') && !body.includes('shopId')) {
       return;
     }
 
+    for (const segment of body.split(RECORD_SEPARATOR)) {
+      if (segment) {
+        processJsonSegment(segment);
+      }
+    }
+  }
+
+  function processJsonSegment(segment) {
+    if (!segment.includes('dateAnswer') && !segment.includes('isWhatsappTemplate') && !segment.includes('shopId')) {
+      return;
+    }
+
     try {
-      const parsed = JSON.parse(body);
+      const parsed = JSON.parse(segment);
+      // SignalR Invocation envelope ({"type":1,"target":...,"arguments":[...]})
+      // — the real payload is inside `arguments`, not the envelope itself.
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.arguments)) {
+        for (const arg of parsed.arguments) {
+          handleParsedResponse(arg);
+        }
+        return;
+      }
       handleParsedResponse(parsed);
     } catch (error) {
-      // Ignore parse failures; the page may return partial or non-JSON content.
+      // Ignore parse failures for this segment only — a ping/handshake frame
+      // failing to parse must not stop sibling segments in the same frame.
     }
   }
 
