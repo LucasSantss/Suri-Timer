@@ -2,6 +2,8 @@
   const MESSAGE_NAMESPACE = 'suri-timer-ext';
   const conversations = new Map(); // normalizedPhone -> { phone, name, queue, dateAnswer: Date|null, lastSenderChange: Date|null }
   const templateCategories = new Map(); // template id (e.g. "cb57489123:template:93787057") -> category|null
+  const shopProductsById = new Map(); // product id -> {sku, name}
+  const shopCategoriesById = new Map(); // category id -> {name}
 
   let config = null;
   let domainEnabled = true;
@@ -114,6 +116,20 @@
         letter-spacing: 0.02em !important;
         line-height: 1.7 !important;
         white-space: nowrap !important;
+      }
+
+      .suri-shop-badge {
+        display: inline-block !important;
+        margin-left: 8px !important;
+        padding: 1px 8px !important;
+        border-radius: 999px !important;
+        font-size: 10px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.01em !important;
+        white-space: nowrap !important;
+        vertical-align: middle !important;
+        background: rgba(100, 116, 139, 0.16) !important;
+        color: #64748b !important;
       }
 
       [data-suri-marker] {
@@ -798,6 +814,103 @@
     }
   }
 
+  // --- Shop badges (Shop > Produtos / Categorias) ---
+  // Neither table row carries any per-row id/data attribute in the DOM, so
+  // matching against the API record has to go by the visible name text —
+  // same approach as matchConversationForText for the queue rows. A per-pass
+  // `shift()` off each name's candidate list keeps two same-named rows from
+  // both grabbing the same record.
+  const SHOP_PRODUCT_NAME_SELECTOR = 'td[title="Nome do Produto"] h6';
+  const SHOP_CATEGORY_NAME_SELECTOR = 'td[title="Nome da categoria"] h6';
+
+  // Reads the name text of a row's heading while ignoring our own
+  // previously-inserted badge (appended as a child of that same heading) —
+  // otherwise the badge's own text would get folded into `textContent` on
+  // every refresh after the first, and the name would never match again.
+  function getNameTextExcludingBadge(nameEl) {
+    const badge = nameEl.querySelector(':scope > [data-suri-shop-badge]');
+    if (!badge) {
+      return nameEl.textContent.trim();
+    }
+    const clone = nameEl.cloneNode(true);
+    const clonedBadge = clone.querySelector(':scope > [data-suri-shop-badge]');
+    if (clonedBadge) clonedBadge.remove();
+    return clone.textContent.trim();
+  }
+
+  function getShopCandidatesByName(recordsById) {
+    const byName = new Map();
+    for (const [id, record] of recordsById.entries()) {
+      if (!record.name) continue;
+      if (!byName.has(record.name)) byName.set(record.name, []);
+      byName.get(record.name).push({ id, ...record });
+    }
+    return byName;
+  }
+
+  function styleShopBadge(nameEl, text) {
+    let badge = nameEl.querySelector(':scope > [data-suri-shop-badge]');
+
+    if (!text) {
+      if (badge) badge.remove();
+      return;
+    }
+
+    if (badge && badge.dataset.suriShopText === text) {
+      return;
+    }
+
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.setAttribute('data-suri-shop-badge', 'true');
+      badge.className = 'suri-shop-badge';
+      nameEl.appendChild(badge);
+    }
+
+    badge.dataset.suriShopText = text;
+    badge.textContent = text;
+  }
+
+  function refreshShopRows() {
+    if (!domainEnabled || !config || config.showShopInfo === false) {
+      clearAllShopBadges();
+      return;
+    }
+
+    if (shopProductsById.size) {
+      const byName = getShopCandidatesByName(shopProductsById);
+      for (const nameEl of document.querySelectorAll(SHOP_PRODUCT_NAME_SELECTOR)) {
+        const name = getNameTextExcludingBadge(nameEl);
+        const candidates = byName.get(name);
+        const entry = candidates && candidates.shift();
+        if (!entry) continue;
+
+        const parts = [];
+        if (entry.sku) parts.push(`SKU: ${entry.sku}`);
+        parts.push(`ID: ${entry.id}`);
+        styleShopBadge(nameEl, parts.join(' · '));
+      }
+    }
+
+    if (shopCategoriesById.size) {
+      const byName = getShopCandidatesByName(shopCategoriesById);
+      for (const nameEl of document.querySelectorAll(SHOP_CATEGORY_NAME_SELECTOR)) {
+        const name = getNameTextExcludingBadge(nameEl);
+        const candidates = byName.get(name);
+        const entry = candidates && candidates.shift();
+        if (!entry) continue;
+
+        styleShopBadge(nameEl, `ID: ${entry.id}`);
+      }
+    }
+  }
+
+  function clearAllShopBadges() {
+    for (const badge of document.querySelectorAll('[data-suri-shop-badge]')) {
+      badge.remove();
+    }
+  }
+
   // refreshQueueColors() is O(rows × tracked conversations) — with Automático
   // now tracking every conversation (not just the handful active in
   // Atendimentos), repainting the whole visible list on every single 1s tick
@@ -823,6 +936,12 @@
     }
     refreshActiveConversationColor();
     refreshTemplateCards();
+
+    try {
+      refreshShopRows();
+    } catch (e) {
+      console.error('[Suri] refreshShopRows falhou:', e);
+    }
 
     const now = Date.now();
     // `forceQueueColors` (set when scheduleRefresh fires for freshly
@@ -863,6 +982,24 @@
       const { id, category } = event.data.payload || {};
       if (id) {
         templateCategories.set(id, category || null);
+        scheduleRefresh();
+      }
+      return;
+    }
+
+    if (event.data.type === 'SHOP_PRODUCT_UPDATE') {
+      const { id, sku, name } = event.data.payload || {};
+      if (id) {
+        shopProductsById.set(id, { sku: sku || null, name: name || null });
+        scheduleRefresh();
+      }
+      return;
+    }
+
+    if (event.data.type === 'SHOP_CATEGORY_UPDATE') {
+      const { id, name } = event.data.payload || {};
+      if (id) {
+        shopCategoriesById.set(id, { name: name || null });
         scheduleRefresh();
       }
       return;
@@ -924,6 +1061,7 @@
       clearHighlight();
       clearAllRowStyles();
       clearAllTemplateBadges();
+      clearAllShopBadges();
       applyPageTheme('light');
       stopColorLoop();
       return;

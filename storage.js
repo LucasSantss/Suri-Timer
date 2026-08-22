@@ -7,6 +7,7 @@
     themeContrast: 100,
     themeLightBrightness: 100,
     themeLightContrast: 100,
+    showShopInfo: true,
     thresholds: [
       { minMinutes: 0, color: '#22c55e' },
       { minMinutes: 5, color: '#facc15' },

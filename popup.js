@@ -13,6 +13,7 @@ const state = {
   themeContrast: 100,
   themeLightBrightness: 100,
   themeLightContrast: 100,
+  showShopInfo: true,
   thresholds: [DEFAULT_RULE],
   domains: {
     'portal.chatbotmaker.io': true,
@@ -161,6 +162,7 @@ function saveConfig(options = {}) {
     themeContrast: state.themeContrast,
     themeLightBrightness: state.themeLightBrightness,
     themeLightContrast: state.themeLightContrast,
+    showShopInfo: state.showShopInfo,
     thresholds: state.thresholds,
     domains: state.domains
   };
@@ -187,6 +189,7 @@ async function init() {
   state.themeContrast = config.themeContrast ?? 100;
   state.themeLightBrightness = config.themeLightBrightness ?? 100;
   state.themeLightContrast = config.themeLightContrast ?? 100;
+  state.showShopInfo = config.showShopInfo !== false;
   state.thresholds = (config.thresholds && config.thresholds.length) ? config.thresholds : [DEFAULT_RULE];
   state.domains = { ...state.domains, ...(config.domains || {}) };
 
@@ -195,6 +198,9 @@ async function init() {
   updateSliders();
   renderDomains();
   renderRules();
+
+  const showShopInfoCheckbox = document.getElementById('showShopInfo');
+  if (showShopInfoCheckbox) showShopInfoCheckbox.checked = state.showShopInfo;
 }
 
 document.querySelectorAll('.theme-option').forEach((button) => {
@@ -235,6 +241,11 @@ document.getElementById('lightContrast').addEventListener('input', (event) => {
 });
 document.getElementById('lightContrast').addEventListener('change', () => {
   saveConfig({ message: 'Contraste ajustado.' });
+});
+
+document.getElementById('showShopInfo').addEventListener('change', (event) => {
+  state.showShopInfo = event.target.checked;
+  saveConfig({ message: `Identificação do Shop ${state.showShopInfo ? 'ativada' : 'desativada'}.` });
 });
 
 document.getElementById('addRule').addEventListener('click', () => {

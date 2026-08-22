@@ -13,6 +13,7 @@ const state = {
   themeContrast: 100,
   themeLightBrightness: 100,
   themeLightContrast: 100,
+  showShopInfo: true,
   thresholds: [
     { minMinutes: 0, color: '#22c55e' },
     { minMinutes: 5, color: '#facc15' },
@@ -197,6 +198,7 @@ function loadConfig() {
     state.themeContrast = config.themeContrast ?? 100;
     state.themeLightBrightness = config.themeLightBrightness ?? 100;
     state.themeLightContrast = config.themeLightContrast ?? 100;
+    state.showShopInfo = config.showShopInfo !== false;
     state.thresholds = (config.thresholds && config.thresholds.length)
       ? config.thresholds
       : [DEFAULT_RULE];
@@ -211,6 +213,9 @@ function loadConfig() {
     renderRules();
     renderDomains();
     updatePreview();
+
+    const showShopInfoCheckbox = document.getElementById('showShopInfo');
+    if (showShopInfoCheckbox) showShopInfoCheckbox.checked = state.showShopInfo;
   });
 }
 
@@ -230,6 +235,7 @@ function saveConfig(options = {}) {
     themeContrast: state.themeContrast,
     themeLightBrightness: state.themeLightBrightness,
     themeLightContrast: state.themeLightContrast,
+    showShopInfo: state.showShopInfo,
     thresholds: state.thresholds,
     domains: state.domains
   };
@@ -295,6 +301,11 @@ document.getElementById('lightContrast').addEventListener('input', (event) => {
 });
 document.getElementById('lightContrast').addEventListener('change', () => {
   saveConfig({ message: 'Contraste ajustado.' });
+});
+
+document.getElementById('showShopInfo').addEventListener('change', (event) => {
+  state.showShopInfo = event.target.checked;
+  saveConfig({ message: `Identificação do Shop ${state.showShopInfo ? 'ativada' : 'desativada'}.` });
 });
 
 document.querySelectorAll('.tab').forEach((tab) => {

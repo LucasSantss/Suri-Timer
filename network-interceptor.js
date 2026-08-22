@@ -3,6 +3,8 @@
   const MAX_PHONE_DIGITS = 15;
   const cache = new Map();
   const templateCache = new Map(); // template id -> category
+  const shopProductCache = new Map(); // product id -> {sku, name}
+  const shopCategoryCache = new Map(); // category id -> {name}
 
   function normalizePhone(value) {
     return String(value ?? '').replace(/\D/g, '');
@@ -58,6 +60,14 @@
     }
 
     if ('isWhatsappTemplate' in value && 'category' in value) {
+      return true;
+    }
+
+    if ('sku' in value && 'shopId' in value) {
+      return true;
+    }
+
+    if ('children' in value && 'shopId' in value) {
       return true;
     }
 
@@ -127,6 +137,61 @@
 
     templateCache.set(id, category);
     postTemplateUpdate(id, category);
+  }
+
+  function postShopProductUpdate(id, sku, name) {
+    window.postMessage({
+      source: MESSAGE_NAMESPACE,
+      type: 'SHOP_PRODUCT_UPDATE',
+      payload: { id, sku: sku || null, name: name || null }
+    }, window.location.origin);
+  }
+
+  function postShopCategoryUpdate(id, name) {
+    window.postMessage({
+      source: MESSAGE_NAMESPACE,
+      type: 'SHOP_CATEGORY_UPDATE',
+      payload: { id, name: name || null }
+    }, window.location.origin);
+  }
+
+  // Records from Shop > Produtos (GET .../shop/products) — `sku` alongside
+  // `shopId` is specific enough to this payload shape to key detection on
+  // directly.
+  function storeShopProduct(record) {
+    const id = record.id;
+    if (!id || typeof id !== 'string') {
+      return;
+    }
+
+    const sku = record.sku || null;
+    const name = record.name || null;
+    const previous = shopProductCache.get(id);
+    if (previous && previous.sku === sku && previous.name === name) {
+      return;
+    }
+
+    shopProductCache.set(id, { sku, name });
+    postShopProductUpdate(id, sku, name);
+  }
+
+  // Records from Shop > Categorias (GET .../shop/categories) — and also the
+  // nested `category` object inside each product record, which shares this
+  // exact shape (`children` + `shopId`), so both sources feed the same cache.
+  function storeShopCategory(record) {
+    const id = record.id;
+    if (!id || typeof id !== 'string') {
+      return;
+    }
+
+    const name = record.name || null;
+    const previous = shopCategoryCache.get(id);
+    if (previous && previous.name === name) {
+      return;
+    }
+
+    shopCategoryCache.set(id, { name });
+    postShopCategoryUpdate(id, name);
   }
 
   function storeConversation(record) {
@@ -222,7 +287,7 @@
     if (!body || typeof body !== 'string') {
       return;
     }
-    if (!body.includes('dateAnswer') && !body.includes('isWhatsappTemplate')) {
+    if (!body.includes('dateAnswer') && !body.includes('isWhatsappTemplate') && !body.includes('shopId')) {
       return;
     }
 
@@ -347,6 +412,12 @@
     }
     for (const [id, category] of templateCache.entries()) {
       postTemplateUpdate(id, category);
+    }
+    for (const [id, { sku, name }] of shopProductCache.entries()) {
+      postShopProductUpdate(id, sku, name);
+    }
+    for (const [id, { name }] of shopCategoryCache.entries()) {
+      postShopCategoryUpdate(id, name);
     }
   });
 })();
