@@ -118,6 +118,14 @@
         white-space: nowrap !important;
       }
 
+      /* Inside the "Selecione o modelo" Chosen picker the badge sits inline
+         in plain option text instead of a flex row with its own gap (like
+         the template card footer), so it needs its own left margin here. */
+      li.active-result > .suri-category-badge {
+        margin-left: 8px !important;
+        vertical-align: middle !important;
+      }
+
       .suri-shop-badge {
         display: inline-block !important;
         margin-left: 8px !important;
@@ -814,6 +822,43 @@
     }
   }
 
+  // --- Template category badges in the "Selecione o modelo" picker (the
+  // jQuery Chosen dropdown used when sending a template message) ---
+  // Chosen renders <li class="active-result" data-option-array-index="N">
+  // from the real (hidden) <select name="template">'s <option>s, in the same
+  // order — `data-option-array-index` IS that option's index. So instead of
+  // matching by the visible label text (fragile: trailing whitespace, accents,
+  // duplicate titles), each <li> is resolved back to its <option>, whose
+  // `value` is the exact same template id `templateCategories` is keyed by
+  // (confirmed directly from this app's DOM: <option value="cb57489123:template:128925045">).
+  // Reuses `styleTemplateBadge` (append-as-last-child works fine on an <li>'s
+  // plain text too), so `clearAllTemplateBadges` above already tears these
+  // down along with the template-card ones.
+  const TEMPLATE_SELECT_SELECTOR = 'select[name="template"]';
+
+  function refreshTemplateChooserOptions() {
+    if (!domainEnabled || !templateCategories.size) return;
+
+    for (const select of document.querySelectorAll(TEMPLATE_SELECT_SELECTOR)) {
+      const container = select.nextElementSibling;
+      if (!container || !container.classList.contains('chosen-container')) continue;
+
+      const items = container.querySelectorAll('li.active-result[data-option-array-index]');
+      for (const li of items) {
+        const index = Number(li.getAttribute('data-option-array-index'));
+        const option = select.options[index];
+        const id = option ? option.value : null;
+        if (!id || !templateCategories.has(id)) continue;
+
+        try {
+          styleTemplateBadge(li, templateCategories.get(id));
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+  }
+
   // --- Shop badges (Shop > Produtos / Categorias) ---
   // Neither table row carries any per-row id/data attribute in the DOM, so
   // matching against the API record has to go by the visible name text —
@@ -827,13 +872,13 @@
   // previously-inserted badge (appended as a child of that same heading) —
   // otherwise the badge's own text would get folded into `textContent` on
   // every refresh after the first, and the name would never match again.
-  function getNameTextExcludingBadge(nameEl) {
-    const badge = nameEl.querySelector(':scope > [data-suri-shop-badge]');
+  function getNameTextExcludingBadge(nameEl, badgeAttr = 'data-suri-shop-badge') {
+    const badge = nameEl.querySelector(`:scope > [${badgeAttr}]`);
     if (!badge) {
       return nameEl.textContent.trim();
     }
     const clone = nameEl.cloneNode(true);
-    const clonedBadge = clone.querySelector(':scope > [data-suri-shop-badge]');
+    const clonedBadge = clone.querySelector(`:scope > [${badgeAttr}]`);
     if (clonedBadge) clonedBadge.remove();
     return clone.textContent.trim();
   }
@@ -936,6 +981,12 @@
     }
     refreshActiveConversationColor();
     refreshTemplateCards();
+
+    try {
+      refreshTemplateChooserOptions();
+    } catch (e) {
+      console.error('[Suri] refreshTemplateChooserOptions falhou:', e);
+    }
 
     try {
       refreshShopRows();
@@ -1150,6 +1201,26 @@
   // Usage in the page console:
   //   copy(JSON.stringify(window.__suriTimerDebug.getRowsSnapshot(), null, 2))
   window.__suriTimerDebug = {
+    getTemplateChooserState: () => ({
+      domainEnabled,
+      templatesCaptured: templateCategories.size,
+      selects: Array.from(document.querySelectorAll(TEMPLATE_SELECT_SELECTOR)).map((select) => {
+        const container = select.nextElementSibling;
+        const items = container && container.classList.contains('chosen-container')
+          ? Array.from(container.querySelectorAll('li.active-result[data-option-array-index]'))
+          : [];
+        return {
+          hasChosenContainer: !!(container && container.classList.contains('chosen-container')),
+          liCount: items.length,
+          resolved: items.map((li) => {
+            const index = Number(li.getAttribute('data-option-array-index'));
+            const option = select.options[index];
+            const id = option ? option.value : null;
+            return { text: li.textContent.trim(), index, id, category: id ? templateCategories.get(id) ?? null : null };
+          })
+        };
+      })
+    }),
     getShopState: () => ({
       domainEnabled,
       showShopInfo: config ? config.showShopInfo : null,
