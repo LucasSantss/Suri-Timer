@@ -227,7 +227,6 @@
     if (!force && signature === __lastAppliedTheme) {
       return;
     }
-    __lastAppliedTheme = signature;
 
     injectGlobalStyles();
     document.documentElement.classList.toggle('suri-dark-mode-fallback', theme === 'dark');
@@ -244,6 +243,14 @@
       if (window.DarkReader) window.DarkReader.disable();
       applyLightFilter(brightness, contrast);
     }
+
+    // Only remembered as "applied" once every step above actually ran — if
+    // any of them had thrown, the signature must NOT be cached, otherwise
+    // this exact theme/brightness/contrast combination would be silently
+    // skipped on every future tick (the guard above) and never retried,
+    // even after the underlying issue (e.g. a script that hadn't finished
+    // loading yet) resolved itself a second later.
+    __lastAppliedTheme = signature;
   }
 
   let __themeForceTimer = null;
@@ -252,8 +259,12 @@
     if (__themeForceTimer) clearTimeout(__themeForceTimer);
     __themeForceTimer = setTimeout(() => {
       __themeForceTimer = null;
-      const { brightness, contrast } = getThemeBrightnessContrast(config);
-      applyPageTheme(config.theme, brightness, contrast, true);
+      try {
+        const { brightness, contrast } = getThemeBrightnessContrast(config);
+        applyPageTheme(config.theme, brightness, contrast, true);
+      } catch (e) {
+        console.error('[Suri] applyPageTheme (force) falhou:', e);
+      }
     }, 1200);
   }
 
@@ -803,8 +814,12 @@
     // was opened, new content rendered) so Dark Reader re-scans and themes
     // whatever is new — it doesn't always catch that on its own.
     if (domainEnabled && config) {
-      const { brightness, contrast } = getThemeBrightnessContrast(config);
-      applyPageTheme(config.theme, brightness, contrast, forceTheme);
+      try {
+        const { brightness, contrast } = getThemeBrightnessContrast(config);
+        applyPageTheme(config.theme, brightness, contrast, forceTheme);
+      } catch (e) {
+        console.error('[Suri] applyPageTheme falhou:', e);
+      }
     }
     refreshActiveConversationColor();
     refreshTemplateCards();
@@ -914,8 +929,12 @@
       return;
     }
 
-    const { brightness, contrast } = getThemeBrightnessContrast(config);
-    applyPageTheme(config.theme, brightness, contrast);
+    try {
+      const { brightness, contrast } = getThemeBrightnessContrast(config);
+      applyPageTheme(config.theme, brightness, contrast);
+    } catch (e) {
+      console.error('[Suri] applyPageTheme (applyConfig) falhou:', e);
+    }
     startColorLoop();
     installObserver();
     refreshAll();
@@ -993,6 +1012,13 @@
   // Usage in the page console:
   //   copy(JSON.stringify(window.__suriTimerDebug.getRowsSnapshot(), null, 2))
   window.__suriTimerDebug = {
+    getConfig: () => ({
+      domainEnabled,
+      config,
+      lastAppliedTheme: __lastAppliedTheme,
+      resolvedBrightnessContrast: getThemeBrightnessContrast(config),
+      bodyFilter: document.body ? document.body.style.filter : null
+    }),
     getConversations: () => Array.from(conversations.entries()).map(([key, c]) => ({
       key,
       phone: c.phone,
