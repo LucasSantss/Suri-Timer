@@ -247,6 +247,14 @@
         font-size: 12px;
         text-align: center;
       }
+
+      .theme-settings {
+        display: none;
+      }
+
+      .theme-settings.active {
+        display: block;
+      }
     </style>
   </head>
   <body>
@@ -258,18 +266,30 @@
 
       <div class="section">
         <h2>Tema da página</h2>
-        <p class="rule-hint">Claro não altera a página. Escuro inverte as cores de toda a página (estilo Dark Reader).</p>
+        <p class="rule-hint">Claro ajusta brilho/contraste sem inverter cores. Escuro inverte as cores de toda a página (estilo Dark Reader).</p>
         <div class="theme-row">
           <button type="button" class="theme-option" data-theme="light">Claro</button>
           <button type="button" class="theme-option" data-theme="dark">Escuro</button>
         </div>
-        <div class="slider-row">
-          <label>Brilho <span id="brightnessValue">100%</span></label>
-          <input type="range" id="brightness" min="50" max="150" step="5" value="100" />
+        <div class="theme-settings" data-theme-settings="light">
+          <div class="slider-row">
+            <label>Brilho <span id="lightBrightnessValue">100%</span></label>
+            <input type="range" id="lightBrightness" min="50" max="150" step="5" value="100" />
+          </div>
+          <div class="slider-row">
+            <label>Contraste <span id="lightContrastValue">100%</span></label>
+            <input type="range" id="lightContrast" min="50" max="150" step="5" value="100" />
+          </div>
         </div>
-        <div class="slider-row">
-          <label>Contraste <span id="contrastValue">100%</span></label>
-          <input type="range" id="contrast" min="50" max="150" step="5" value="100" />
+        <div class="theme-settings" data-theme-settings="dark">
+          <div class="slider-row">
+            <label>Brilho <span id="brightnessValue">100%</span></label>
+            <input type="range" id="brightness" min="50" max="150" step="5" value="100" />
+          </div>
+          <div class="slider-row">
+            <label>Contraste <span id="contrastValue">100%</span></label>
+            <input type="range" id="contrast" min="50" max="150" step="5" value="100" />
+          </div>
         </div>
       </div>
 
