@@ -195,7 +195,7 @@
 
       .rule-row {
         display: grid;
-        grid-template-columns: 1.4fr 1fr 1fr auto;
+        grid-template-columns: 1.8fr 1fr 1fr auto;
         gap: 12px;
         align-items: center;
         background: rgba(15, 23, 42, 0.5);
@@ -218,6 +218,14 @@
       }
 
       .tab-panel.active {
+        display: block;
+      }
+
+      .theme-settings {
+        display: none;
+      }
+
+      .theme-settings.active {
         display: block;
       }
 
@@ -297,7 +305,7 @@
         line-height: 1.5;
       }
 
-      input[type="number"], input[type="color"] {
+      input[type="number"], input[type="color"], select {
         width: 100%;
         height: 42px;
         border-radius: 10px;
@@ -310,6 +318,22 @@
       input[type="color"] {
         padding: 4px;
         min-width: 72px;
+      }
+
+      .time-input-row {
+        display: flex;
+        gap: 8px;
+      }
+
+      .time-input-row input[type="number"] {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .time-input-row select {
+        flex: none;
+        width: auto;
+        min-width: 92px;
       }
 
       .btn-row {
@@ -368,20 +392,34 @@
           <button type="button" class="tab active" data-tab="tema">Tema</button>
           <button type="button" class="tab" data-tab="tempos">Tempos</button>
           <button type="button" class="tab" data-tab="dominios">Domínios</button>
+          <button type="button" class="tab" data-tab="shop">Shop</button>
         </div>
 
         <div class="content">
           <div class="tab-panel active" data-panel="tema">
             <div class="section">
               <h2>Tema da página</h2>
-              <p class="help-text">"Claro" não altera a página. "Escuro" inverte as cores de toda a página, no estilo Dark Reader — útil para quem prefere trabalhar com a tela escura.</p>
+              <p class="help-text">"Claro" ajusta brilho/contraste sem inverter cores. "Escuro" inverte as cores de toda a página.</p>
               <div class="theme-toggle">
                 <button type="button" class="theme-option" data-theme="light">Claro</button>
                 <button type="button" class="theme-option" data-theme="dark">Escuro</button>
               </div>
             </div>
 
-            <div class="section">
+            <div class="section theme-settings" data-theme-settings="light">
+              <h2>Ajustes do tema claro</h2>
+              <p class="help-text">Aplica um filtro de brilho/contraste na página, sem inverter as cores. Só afetam a página quando o tema Claro está ativo.</p>
+              <div class="slider-row">
+                <label>Brilho <span id="lightBrightnessValue">100%</span></label>
+                <input type="range" id="lightBrightness" min="50" max="150" step="5" value="100" />
+              </div>
+              <div class="slider-row">
+                <label>Contraste <span id="lightContrastValue">100%</span></label>
+                <input type="range" id="lightContrast" min="50" max="150" step="5" value="100" />
+              </div>
+            </div>
+
+            <div class="section theme-settings" data-theme-settings="dark">
               <h2>Ajustes do tema escuro</h2>
               <p class="help-text">Só afetam a página quando o tema Escuro está ativo.</p>
               <div class="slider-row">
@@ -422,6 +460,22 @@
               <h2>Domínios ativos</h2>
               <p class="help-text">Escolha em qual das plataformas da Suri o cronômetro deve aparecer. A alteração é salva imediatamente.</p>
               <div id="domains"></div>
+            </div>
+          </div>
+
+          <div class="tab-panel" data-panel="shop">
+            <div class="section">
+              <h2>Identificação no Shop</h2>
+              <p class="help-text">Mostra o SKU e o ID de cada produto, e o ID de cada categoria, ao lado do nome nas telas de Shop.</p>
+              <div class="domain-row">
+                <div>
+                  <div class="domain-name">Mostrar SKU/ID no Shop</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="showShopInfo" />
+                  <span class="switch-track"></span>
+                </label>
+              </div>
             </div>
           </div>
 

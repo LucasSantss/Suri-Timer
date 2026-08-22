@@ -5,10 +5,13 @@
     theme: 'light',
     themeBrightness: 100,
     themeContrast: 100,
+    themeLightBrightness: 100,
+    themeLightContrast: 100,
+    showShopInfo: true,
     thresholds: [
-      { minMinutes: 0, color: '#22c55e' },
-      { minMinutes: 5, color: '#facc15' },
-      { minMinutes: 15, color: '#ef4444' }
+      { minMinutes: 0, value: 0, unit: 'minutes', color: '#22c55e' },
+      { minMinutes: 5, value: 5, unit: 'minutes', color: '#facc15' },
+      { minMinutes: 15, value: 15, unit: 'minutes', color: '#ef4444' }
     ],
     domains: {
       'portal.chatbotmaker.io': true,

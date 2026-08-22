@@ -1,4 +1,11 @@
-const DEFAULT_RULE = { minMinutes: 0, color: '#22c55e' };
+const DEFAULT_RULE = { minMinutes: 0, value: 0, unit: 'minutes', color: '#22c55e' };
+
+const MINUTES_PER_UNIT = { minutes: 1, hours: 60, days: 1440 };
+const UNIT_LABELS = { minutes: 'Min', hours: 'Horas', days: 'Dias' };
+
+function toMinutes(value, unit) {
+  return (Number(value) || 0) * (MINUTES_PER_UNIT[unit] || 1);
+}
 
 // The TalkJS chat iframe has no toggle of its own — it just follows
 // whichever of these portal domains is actually embedding it.
@@ -11,6 +18,9 @@ const state = {
   theme: 'light',
   themeBrightness: 100,
   themeContrast: 100,
+  themeLightBrightness: 100,
+  themeLightContrast: 100,
+  showShopInfo: true,
   thresholds: [DEFAULT_RULE],
   domains: {
     'portal.chatbotmaker.io': true,
@@ -29,17 +39,23 @@ function updateThemeButtons() {
   document.querySelectorAll('.theme-option').forEach((button) => {
     button.classList.toggle('active', button.dataset.theme === state.theme);
   });
+  document.querySelectorAll('.theme-settings').forEach((section) => {
+    section.classList.toggle('active', section.dataset.themeSettings === state.theme);
+  });
 }
 
 function updateSliders() {
-  const brightness = document.getElementById('brightness');
-  const contrast = document.getElementById('contrast');
-  const brightnessValue = document.getElementById('brightnessValue');
-  const contrastValue = document.getElementById('contrastValue');
-  if (brightness) brightness.value = state.themeBrightness;
-  if (contrast) contrast.value = state.themeContrast;
-  if (brightnessValue) brightnessValue.textContent = `${state.themeBrightness}%`;
-  if (contrastValue) contrastValue.textContent = `${state.themeContrast}%`;
+  [
+    ['brightness', 'brightnessValue', state.themeBrightness],
+    ['contrast', 'contrastValue', state.themeContrast],
+    ['lightBrightness', 'lightBrightnessValue', state.themeLightBrightness],
+    ['lightContrast', 'lightContrastValue', state.themeLightContrast]
+  ].forEach(([inputId, labelId, value]) => {
+    const input = document.getElementById(inputId);
+    const label = document.getElementById(labelId);
+    if (input) input.value = value;
+    if (label) label.textContent = `${value}%`;
+  });
 }
 
 function renderDomains() {
@@ -92,14 +108,29 @@ function renderRules() {
     const row = document.createElement('div');
     row.className = 'rule-row';
 
-    const minInput = document.createElement('input');
-    minInput.type = 'number';
-    minInput.min = '0';
-    minInput.step = '1';
-    minInput.value = rule.minMinutes;
-    minInput.title = 'Minutos';
-    minInput.addEventListener('input', (event) => {
-      state.thresholds[index].minMinutes = Number(event.target.value) || 0;
+    const valueInput = document.createElement('input');
+    valueInput.type = 'number';
+    valueInput.min = '0';
+    valueInput.step = '1';
+    valueInput.value = rule.value;
+    valueInput.title = 'Tempo';
+    valueInput.addEventListener('input', (event) => {
+      state.thresholds[index].value = Number(event.target.value) || 0;
+      state.thresholds[index].minMinutes = toMinutes(state.thresholds[index].value, state.thresholds[index].unit);
+    });
+
+    const unitSelect = document.createElement('select');
+    unitSelect.title = 'Unidade';
+    Object.entries(UNIT_LABELS).forEach(([unitKey, label]) => {
+      const option = document.createElement('option');
+      option.value = unitKey;
+      option.textContent = label;
+      if (unitKey === rule.unit) option.selected = true;
+      unitSelect.appendChild(option);
+    });
+    unitSelect.addEventListener('change', (event) => {
+      state.thresholds[index].unit = event.target.value;
+      state.thresholds[index].minMinutes = toMinutes(state.thresholds[index].value, state.thresholds[index].unit);
     });
 
     const colorInput = document.createElement('input');
@@ -122,19 +153,29 @@ function renderRules() {
       renderRules();
     });
 
-    row.appendChild(minInput);
+    row.appendChild(valueInput);
+    row.appendChild(unitSelect);
     row.appendChild(colorInput);
     row.appendChild(removeBtn);
     rulesRoot.appendChild(row);
   });
 }
 
+// Old stored rules only ever had `minMinutes` — no `value`/`unit`. Falling
+// back to `unit: 'minutes'` for those keeps them displaying exactly as
+// before instead of guessing a "nicer" unit for pre-existing data.
 function normalizeThresholds() {
   state.thresholds = [...state.thresholds]
-    .map((rule) => ({
-      minMinutes: Number(rule.minMinutes) || 0,
-      color: rule.color || '#22c55e'
-    }))
+    .map((rule) => {
+      const unit = MINUTES_PER_UNIT[rule.unit] ? rule.unit : 'minutes';
+      const value = Number(rule.value ?? rule.minMinutes) || 0;
+      return {
+        value,
+        unit,
+        minMinutes: toMinutes(value, unit),
+        color: rule.color || '#22c55e'
+      };
+    })
     .sort((a, b) => a.minMinutes - b.minMinutes);
 }
 
@@ -151,6 +192,9 @@ function saveConfig(options = {}) {
     theme: state.theme,
     themeBrightness: state.themeBrightness,
     themeContrast: state.themeContrast,
+    themeLightBrightness: state.themeLightBrightness,
+    themeLightContrast: state.themeLightContrast,
+    showShopInfo: state.showShopInfo,
     thresholds: state.thresholds,
     domains: state.domains
   };
@@ -175,6 +219,9 @@ async function init() {
   state.theme = config.theme || 'light';
   state.themeBrightness = config.themeBrightness ?? 100;
   state.themeContrast = config.themeContrast ?? 100;
+  state.themeLightBrightness = config.themeLightBrightness ?? 100;
+  state.themeLightContrast = config.themeLightContrast ?? 100;
+  state.showShopInfo = config.showShopInfo !== false;
   state.thresholds = (config.thresholds && config.thresholds.length) ? config.thresholds : [DEFAULT_RULE];
   state.domains = { ...state.domains, ...(config.domains || {}) };
 
@@ -183,6 +230,9 @@ async function init() {
   updateSliders();
   renderDomains();
   renderRules();
+
+  const showShopInfoCheckbox = document.getElementById('showShopInfo');
+  if (showShopInfoCheckbox) showShopInfoCheckbox.checked = state.showShopInfo;
 }
 
 document.querySelectorAll('.theme-option').forEach((button) => {
@@ -209,9 +259,31 @@ document.getElementById('contrast').addEventListener('change', () => {
   saveConfig({ message: 'Contraste ajustado.' });
 });
 
+document.getElementById('lightBrightness').addEventListener('input', (event) => {
+  state.themeLightBrightness = Number(event.target.value);
+  updateSliders();
+});
+document.getElementById('lightBrightness').addEventListener('change', () => {
+  saveConfig({ message: 'Brilho ajustado.' });
+});
+
+document.getElementById('lightContrast').addEventListener('input', (event) => {
+  state.themeLightContrast = Number(event.target.value);
+  updateSliders();
+});
+document.getElementById('lightContrast').addEventListener('change', () => {
+  saveConfig({ message: 'Contraste ajustado.' });
+});
+
+document.getElementById('showShopInfo').addEventListener('change', (event) => {
+  state.showShopInfo = event.target.checked;
+  saveConfig({ message: `Identificação do Shop ${state.showShopInfo ? 'ativada' : 'desativada'}.` });
+});
+
 document.getElementById('addRule').addEventListener('click', () => {
   const lastMinutes = state.thresholds[state.thresholds.length - 1]?.minMinutes || 0;
-  state.thresholds.push({ minMinutes: lastMinutes + 5, color: '#ef4444' });
+  const value = lastMinutes + 5;
+  state.thresholds.push({ value, unit: 'minutes', minMinutes: value, color: '#ef4444' });
   renderRules();
 });
 

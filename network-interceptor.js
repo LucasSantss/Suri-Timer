@@ -1,7 +1,11 @@
 (() => {
   const MESSAGE_NAMESPACE = 'suri-timer-ext';
   const MAX_PHONE_DIGITS = 15;
+  const RECORD_SEPARATOR = String.fromCharCode(30); // SignalR JSON Hub Protocol message terminator
   const cache = new Map();
+  const templateCache = new Map(); // template id -> category
+  const shopProductCache = new Map(); // product id -> {sku, name}
+  const shopCategoryCache = new Map(); // category id -> {name}
 
   function normalizePhone(value) {
     return String(value ?? '').replace(/\D/g, '');
@@ -43,20 +47,32 @@
   // at all rather than a guessed one.
   const QUEUE_TYPE_MAP = { 0: 'automatico', 1: 'esperando', 2: 'atendimento' };
 
-  function isLikelyConversationPayload(value) {
+  function isLikelyTrackedPayload(value) {
     if (!value || typeof value !== 'object') {
       return false;
     }
 
     if (Array.isArray(value)) {
-      return value.some((item) => isLikelyConversationPayload(item));
+      return value.some((item) => isLikelyTrackedPayload(item));
     }
 
     if ('dateAnswer' in value || 'dateRequest' in value) {
       return true;
     }
 
-    return Object.values(value).some((child) => isLikelyConversationPayload(child));
+    if ('isWhatsappTemplate' in value && 'category' in value) {
+      return true;
+    }
+
+    if ('sku' in value && 'shopId' in value) {
+      return true;
+    }
+
+    if ('children' in value && 'shopId' in value) {
+      return true;
+    }
+
+    return Object.values(value).some((child) => isLikelyTrackedPayload(child));
   }
 
   function postConversationUpdate(entry) {
@@ -96,6 +112,88 @@
     };
 
     window.postMessage(message, window.location.origin);
+  }
+
+  function postTemplateUpdate(id, category) {
+    window.postMessage({
+      source: MESSAGE_NAMESPACE,
+      type: 'TEMPLATE_UPDATE',
+      payload: { id, category: category || null }
+    }, window.location.origin);
+  }
+
+  // Records from the Modelos de Mensagem (templateMessage/list) endpoint —
+  // `isWhatsappTemplate` + `category` together are specific enough to this
+  // payload shape that they're safe to key detection on directly, the same
+  // way conversation records are detected by `dateAnswer` above.
+  function storeTemplate(record) {
+    const id = record.id;
+    if (!id || typeof id !== 'string') {
+      return;
+    }
+
+    const category = record.category || null;
+    if (templateCache.get(id) === category) {
+      return;
+    }
+
+    templateCache.set(id, category);
+    postTemplateUpdate(id, category);
+  }
+
+  function postShopProductUpdate(id, sku, name) {
+    window.postMessage({
+      source: MESSAGE_NAMESPACE,
+      type: 'SHOP_PRODUCT_UPDATE',
+      payload: { id, sku: sku || null, name: name || null }
+    }, window.location.origin);
+  }
+
+  function postShopCategoryUpdate(id, name) {
+    window.postMessage({
+      source: MESSAGE_NAMESPACE,
+      type: 'SHOP_CATEGORY_UPDATE',
+      payload: { id, name: name || null }
+    }, window.location.origin);
+  }
+
+  // Records from Shop > Produtos (GET .../shop/products) — `sku` alongside
+  // `shopId` is specific enough to this payload shape to key detection on
+  // directly.
+  function storeShopProduct(record) {
+    const id = record.id;
+    if (!id || typeof id !== 'string') {
+      return;
+    }
+
+    const sku = record.sku || null;
+    const name = record.name || null;
+    const previous = shopProductCache.get(id);
+    if (previous && previous.sku === sku && previous.name === name) {
+      return;
+    }
+
+    shopProductCache.set(id, { sku, name });
+    postShopProductUpdate(id, sku, name);
+  }
+
+  // Records from Shop > Categorias (GET .../shop/categories) — and also the
+  // nested `category` object inside each product record, which shares this
+  // exact shape (`children` + `shopId`), so both sources feed the same cache.
+  function storeShopCategory(record) {
+    const id = record.id;
+    if (!id || typeof id !== 'string') {
+      return;
+    }
+
+    const name = record.name || null;
+    const previous = shopCategoryCache.get(id);
+    if (previous && previous.name === name) {
+      return;
+    }
+
+    shopCategoryCache.set(id, { name });
+    postShopCategoryUpdate(id, name);
   }
 
   function storeConversation(record) {
@@ -167,6 +265,18 @@
       storeConversation(value);
     }
 
+    if ('isWhatsappTemplate' in value && 'category' in value) {
+      storeTemplate(value);
+    }
+
+    if ('sku' in value && 'shopId' in value) {
+      storeShopProduct(value);
+    }
+
+    if ('children' in value && 'shopId' in value) {
+      storeShopCategory(value);
+    }
+
     for (const child of Object.values(value)) {
       walkObject(child);
     }
@@ -184,21 +294,60 @@
       return;
     }
 
-    if (isLikelyConversationPayload(payload)) {
+    if (isLikelyTrackedPayload(payload)) {
       walkObject(payload);
     }
   }
 
+  // SignalR's JSON Hub Protocol terminates every message with a trailing
+  // Record Separator and can pack several messages into one WebSocket frame
+  // (e.g. a keep-alive ping alongside a real data push). A plain fetch/XHR
+  // body never contains this character, so that common case is untouched:
+  // one segment, same gate + parse as before.
   function processTextBody(body) {
-    if (!body || typeof body !== 'string' || !body.includes('dateAnswer')) {
+    if (!body || typeof body !== 'string') {
+      return;
+    }
+
+    if (body.indexOf(RECORD_SEPARATOR) === -1) {
+      processJsonSegment(body);
+      return;
+    }
+
+    // Cheap pre-filter over the whole frame before paying for split() + a
+    // loop: if none of the markers appear anywhere in it, no individual
+    // segment can contain them either. Keeps the very frequent, tiny
+    // SignalR keep-alive pings essentially free.
+    if (!body.includes('dateAnswer') && !body.includes('isWhatsappTemplate') && !body.includes('shopId')) {
+      return;
+    }
+
+    for (const segment of body.split(RECORD_SEPARATOR)) {
+      if (segment) {
+        processJsonSegment(segment);
+      }
+    }
+  }
+
+  function processJsonSegment(segment) {
+    if (!segment.includes('dateAnswer') && !segment.includes('isWhatsappTemplate') && !segment.includes('shopId')) {
       return;
     }
 
     try {
-      const parsed = JSON.parse(body);
+      const parsed = JSON.parse(segment);
+      // SignalR Invocation envelope ({"type":1,"target":...,"arguments":[...]})
+      // — the real payload is inside `arguments`, not the envelope itself.
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.arguments)) {
+        for (const arg of parsed.arguments) {
+          handleParsedResponse(arg);
+        }
+        return;
+      }
       handleParsedResponse(parsed);
     } catch (error) {
-      // Ignore parse failures; the page may return partial or non-JSON content.
+      // Ignore parse failures for this segment only — a ping/handshake frame
+      // failing to parse must not stop sibling segments in the same frame.
     }
   }
 
@@ -312,6 +461,15 @@
 
     for (const entry of cache.values()) {
       postConversationUpdate(entry);
+    }
+    for (const [id, category] of templateCache.entries()) {
+      postTemplateUpdate(id, category);
+    }
+    for (const [id, { sku, name }] of shopProductCache.entries()) {
+      postShopProductUpdate(id, sku, name);
+    }
+    for (const [id, { name }] of shopCategoryCache.entries()) {
+      postShopCategoryUpdate(id, name);
     }
   });
 })();

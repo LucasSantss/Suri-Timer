@@ -1,6 +1,9 @@
 (() => {
   const MESSAGE_NAMESPACE = 'suri-timer-ext';
   const conversations = new Map(); // normalizedPhone -> { phone, name, queue, dateAnswer: Date|null, lastSenderChange: Date|null }
+  const templateCategories = new Map(); // template id (e.g. "cb57489123:template:93787057") -> category|null
+  const shopProductsById = new Map(); // product id -> {sku, name}
+  const shopCategoriesById = new Map(); // category id -> {name}
 
   let config = null;
   let domainEnabled = true;
@@ -104,6 +107,31 @@
         transition: background-color 240ms ease, box-shadow 240ms ease, color 240ms ease;
       }
 
+      .suri-category-badge {
+        display: inline-block !important;
+        padding: 2px 9px !important;
+        border-radius: 999px !important;
+        font-size: 11px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.02em !important;
+        line-height: 1.7 !important;
+        white-space: nowrap !important;
+      }
+
+      .suri-shop-badge {
+        display: inline-block !important;
+        margin-left: 8px !important;
+        padding: 1px 8px !important;
+        border-radius: 999px !important;
+        font-size: 10px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.01em !important;
+        white-space: nowrap !important;
+        vertical-align: middle !important;
+        background: rgba(100, 116, 139, 0.16) !important;
+        color: #64748b !important;
+      }
+
       [data-suri-marker] {
         position: absolute !important;
         top: 0 !important;
@@ -174,31 +202,71 @@
 
   let __lastAppliedTheme = null;
 
+  // Picks whichever pair of sliders is relevant to the currently selected
+  // theme — light and dark keep independent brightness/contrast values so
+  // switching themes doesn't clobber either one's saved adjustment.
+  function getThemeBrightnessContrast(cfg) {
+    if (!cfg) return { brightness: 100, contrast: 100 };
+    if (cfg.theme === 'dark') {
+      return { brightness: cfg.themeBrightness, contrast: cfg.themeContrast };
+    }
+    return { brightness: cfg.themeLightBrightness, contrast: cfg.themeLightContrast };
+  }
+
+  // Light mode never inverts colors (that's what Dark Reader is for), so
+  // brightness/contrast there is a plain CSS filter instead — cheap, and
+  // independent of whether Dark Reader loaded at all. Applied to <body>,
+  // not <html>: Chromium has a long-standing quirk where `filter` set on
+  // the root <html> element renders no visible effect at all, even though
+  // the style is applied without error — body (or any other element) works
+  // correctly.
+  function applyLightFilter(brightness, contrast) {
+    const target = document.body;
+    if (!target) return;
+
+    const b = brightness ?? 100;
+    const c = contrast ?? 100;
+    if (b === 100 && c === 100) {
+      target.style.removeProperty('filter');
+    } else {
+      target.style.filter = `brightness(${b}%) contrast(${c}%)`;
+    }
+  }
+
   // `force` re-runs DarkReader.enable() even when the theme/brightness/
   // contrast haven't changed — used when the page's own DOM changed (e.g.
   // opening a conversation renders a new message thread + details panel)
   // so that newly-inserted content gets themed too, not just what existed
   // when "Escuro" was first turned on.
   function applyPageTheme(theme, brightness, contrast, force = false) {
-    if (!window.DarkReader) return;
-
     const signature = `${theme}|${brightness ?? 100}|${contrast ?? 100}`;
     if (!force && signature === __lastAppliedTheme) {
       return;
     }
-    __lastAppliedTheme = signature;
 
     injectGlobalStyles();
     document.documentElement.classList.toggle('suri-dark-mode-fallback', theme === 'dark');
 
     if (theme === 'dark') {
-      window.DarkReader.enable(
-        { brightness: brightness ?? 100, contrast: contrast ?? 100 },
-        DARK_READER_FIXES
-      );
+      applyLightFilter(100, 100);
+      if (window.DarkReader) {
+        window.DarkReader.enable(
+          { brightness: brightness ?? 100, contrast: contrast ?? 100 },
+          DARK_READER_FIXES
+        );
+      }
     } else {
-      window.DarkReader.disable();
+      if (window.DarkReader) window.DarkReader.disable();
+      applyLightFilter(brightness, contrast);
     }
+
+    // Only remembered as "applied" once every step above actually ran — if
+    // any of them had thrown, the signature must NOT be cached, otherwise
+    // this exact theme/brightness/contrast combination would be silently
+    // skipped on every future tick (the guard above) and never retried,
+    // even after the underlying issue (e.g. a script that hadn't finished
+    // loading yet) resolved itself a second later.
+    __lastAppliedTheme = signature;
   }
 
   let __themeForceTimer = null;
@@ -207,7 +275,12 @@
     if (__themeForceTimer) clearTimeout(__themeForceTimer);
     __themeForceTimer = setTimeout(() => {
       __themeForceTimer = null;
-      applyPageTheme(config.theme, config.themeBrightness, config.themeContrast, true);
+      try {
+        const { brightness, contrast } = getThemeBrightnessContrast(config);
+        applyPageTheme(config.theme, brightness, contrast, true);
+      } catch (e) {
+        console.error('[Suri] applyPageTheme (force) falhou:', e);
+      }
     }, 1200);
   }
 
@@ -709,6 +782,175 @@
     }
   }
 
+  // --- Template category badges (Configurações / Modelos de Mensagem) ---
+  // Each card's delete button carries `name="deleteTemplate-<id>"`, where
+  // <id> (e.g. "cb57489123:template:93787057") matches the `id` field on the
+  // templateMessage/list API record network-interceptor.js reads `category`
+  // off of — so the button name is used directly as the lookup key instead
+  // of parsing the "Identificador" text.
+  const TEMPLATE_DELETE_BUTTON_SELECTOR = 'button[name^="deleteTemplate-"]';
+  const TEMPLATE_ID_PREFIX = 'deleteTemplate-';
+
+  const CATEGORY_COLORS = {
+    MARKETING: '#8b5cf6',
+    UTILITY: '#0ea5e9',
+    AUTHENTICATION: '#f59e0b'
+  };
+
+  function getCategoryColor(category) {
+    return CATEGORY_COLORS[category] || '#64748b';
+  }
+
+  function styleTemplateBadge(container, category) {
+    let badge = container.querySelector(':scope > [data-suri-category-badge]');
+
+    if (!category) {
+      if (badge) badge.remove();
+      return;
+    }
+
+    const label = String(category).toUpperCase();
+    if (badge && badge.dataset.suriCategory === label) {
+      return;
+    }
+
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.setAttribute('data-suri-category-badge', 'true');
+      badge.className = 'suri-category-badge';
+      container.appendChild(badge);
+    }
+
+    const color = getCategoryColor(label);
+    badge.dataset.suriCategory = label;
+    badge.textContent = label;
+    badge.style.backgroundColor = hexToRgba(color, 0.16);
+    badge.style.color = color;
+  }
+
+  function refreshTemplateCards() {
+    if (!domainEnabled || !templateCategories.size) return;
+
+    const buttons = document.querySelectorAll(TEMPLATE_DELETE_BUTTON_SELECTOR);
+    for (const button of buttons) {
+      const id = (button.getAttribute('name') || '').slice(TEMPLATE_ID_PREFIX.length);
+      if (!id || !templateCategories.has(id)) continue;
+
+      const actions = button.closest('.actions');
+      const container = actions ? actions.querySelector('.approval-container') : null;
+      if (!container) continue;
+
+      try {
+        styleTemplateBadge(container, templateCategories.get(id));
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  function clearAllTemplateBadges() {
+    for (const badge of document.querySelectorAll('[data-suri-category-badge]')) {
+      badge.remove();
+    }
+  }
+
+  // --- Shop badges (Shop > Produtos / Categorias) ---
+  // Neither table row carries any per-row id/data attribute in the DOM, so
+  // matching against the API record has to go by the visible name text —
+  // same approach as matchConversationForText for the queue rows. A per-pass
+  // `shift()` off each name's candidate list keeps two same-named rows from
+  // both grabbing the same record.
+  const SHOP_PRODUCT_NAME_SELECTOR = 'td[title="Nome do Produto"] h6';
+  const SHOP_CATEGORY_NAME_SELECTOR = 'td[title="Nome da categoria"] h6';
+
+  // Reads the name text of a row's heading while ignoring our own
+  // previously-inserted badge (appended as a child of that same heading) —
+  // otherwise the badge's own text would get folded into `textContent` on
+  // every refresh after the first, and the name would never match again.
+  function getNameTextExcludingBadge(nameEl) {
+    const badge = nameEl.querySelector(':scope > [data-suri-shop-badge]');
+    if (!badge) {
+      return nameEl.textContent.trim();
+    }
+    const clone = nameEl.cloneNode(true);
+    const clonedBadge = clone.querySelector(':scope > [data-suri-shop-badge]');
+    if (clonedBadge) clonedBadge.remove();
+    return clone.textContent.trim();
+  }
+
+  function getShopCandidatesByName(recordsById) {
+    const byName = new Map();
+    for (const [id, record] of recordsById.entries()) {
+      if (!record.name) continue;
+      if (!byName.has(record.name)) byName.set(record.name, []);
+      byName.get(record.name).push({ id, ...record });
+    }
+    return byName;
+  }
+
+  function styleShopBadge(nameEl, text) {
+    let badge = nameEl.querySelector(':scope > [data-suri-shop-badge]');
+
+    if (!text) {
+      if (badge) badge.remove();
+      return;
+    }
+
+    if (badge && badge.dataset.suriShopText === text) {
+      return;
+    }
+
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.setAttribute('data-suri-shop-badge', 'true');
+      badge.className = 'suri-shop-badge';
+      nameEl.appendChild(badge);
+    }
+
+    badge.dataset.suriShopText = text;
+    badge.textContent = text;
+  }
+
+  function refreshShopRows() {
+    if (!domainEnabled || !config || config.showShopInfo === false) {
+      clearAllShopBadges();
+      return;
+    }
+
+    if (shopProductsById.size) {
+      const byName = getShopCandidatesByName(shopProductsById);
+      for (const nameEl of document.querySelectorAll(SHOP_PRODUCT_NAME_SELECTOR)) {
+        const name = getNameTextExcludingBadge(nameEl);
+        const candidates = byName.get(name);
+        const entry = candidates && candidates.shift();
+        if (!entry) continue;
+
+        const parts = [];
+        if (entry.sku) parts.push(`SKU: ${entry.sku}`);
+        parts.push(`ID: ${entry.id}`);
+        styleShopBadge(nameEl, parts.join(' · '));
+      }
+    }
+
+    if (shopCategoriesById.size) {
+      const byName = getShopCandidatesByName(shopCategoriesById);
+      for (const nameEl of document.querySelectorAll(SHOP_CATEGORY_NAME_SELECTOR)) {
+        const name = getNameTextExcludingBadge(nameEl);
+        const candidates = byName.get(name);
+        const entry = candidates && candidates.shift();
+        if (!entry) continue;
+
+        styleShopBadge(nameEl, `ID: ${entry.id}`);
+      }
+    }
+  }
+
+  function clearAllShopBadges() {
+    for (const badge of document.querySelectorAll('[data-suri-shop-badge]')) {
+      badge.remove();
+    }
+  }
+
   // refreshQueueColors() is O(rows × tracked conversations) — with Automático
   // now tracking every conversation (not just the handful active in
   // Atendimentos), repainting the whole visible list on every single 1s tick
@@ -725,9 +967,21 @@
     // was opened, new content rendered) so Dark Reader re-scans and themes
     // whatever is new — it doesn't always catch that on its own.
     if (domainEnabled && config) {
-      applyPageTheme(config.theme, config.themeBrightness, config.themeContrast, forceTheme);
+      try {
+        const { brightness, contrast } = getThemeBrightnessContrast(config);
+        applyPageTheme(config.theme, brightness, contrast, forceTheme);
+      } catch (e) {
+        console.error('[Suri] applyPageTheme falhou:', e);
+      }
     }
     refreshActiveConversationColor();
+    refreshTemplateCards();
+
+    try {
+      refreshShopRows();
+    } catch (e) {
+      console.error('[Suri] refreshShopRows falhou:', e);
+    }
 
     const now = Date.now();
     // `forceQueueColors` (set when scheduleRefresh fires for freshly
@@ -761,6 +1015,33 @@
     }
 
     if (!event.data || event.data.source !== MESSAGE_NAMESPACE) {
+      return;
+    }
+
+    if (event.data.type === 'TEMPLATE_UPDATE') {
+      const { id, category } = event.data.payload || {};
+      if (id) {
+        templateCategories.set(id, category || null);
+        scheduleRefresh();
+      }
+      return;
+    }
+
+    if (event.data.type === 'SHOP_PRODUCT_UPDATE') {
+      const { id, sku, name } = event.data.payload || {};
+      if (id) {
+        shopProductsById.set(id, { sku: sku || null, name: name || null });
+        scheduleRefresh();
+      }
+      return;
+    }
+
+    if (event.data.type === 'SHOP_CATEGORY_UPDATE') {
+      const { id, name } = event.data.payload || {};
+      if (id) {
+        shopCategoriesById.set(id, { name: name || null });
+        scheduleRefresh();
+      }
       return;
     }
 
@@ -819,12 +1100,19 @@
     if (!domainEnabled) {
       clearHighlight();
       clearAllRowStyles();
+      clearAllTemplateBadges();
+      clearAllShopBadges();
       applyPageTheme('light');
       stopColorLoop();
       return;
     }
 
-    applyPageTheme(config.theme, config.themeBrightness, config.themeContrast);
+    try {
+      const { brightness, contrast } = getThemeBrightnessContrast(config);
+      applyPageTheme(config.theme, brightness, contrast);
+    } catch (e) {
+      console.error('[Suri] applyPageTheme (applyConfig) falhou:', e);
+    }
     startColorLoop();
     installObserver();
     refreshAll();
@@ -902,6 +1190,24 @@
   // Usage in the page console:
   //   copy(JSON.stringify(window.__suriTimerDebug.getRowsSnapshot(), null, 2))
   window.__suriTimerDebug = {
+    getShopState: () => ({
+      domainEnabled,
+      showShopInfo: config ? config.showShopInfo : null,
+      products: Array.from(shopProductsById.entries()),
+      categories: Array.from(shopCategoriesById.entries()),
+      productNameElsFound: document.querySelectorAll(SHOP_PRODUCT_NAME_SELECTOR).length,
+      categoryNameElsFound: document.querySelectorAll(SHOP_CATEGORY_NAME_SELECTOR).length,
+      firstProductRowText: document.querySelector(SHOP_PRODUCT_NAME_SELECTOR)
+        ? getNameTextExcludingBadge(document.querySelector(SHOP_PRODUCT_NAME_SELECTOR))
+        : null
+    }),
+    getConfig: () => ({
+      domainEnabled,
+      config,
+      lastAppliedTheme: __lastAppliedTheme,
+      resolvedBrightnessContrast: getThemeBrightnessContrast(config),
+      bodyFilter: document.body ? document.body.style.filter : null
+    }),
     getConversations: () => Array.from(conversations.entries()).map(([key, c]) => ({
       key,
       phone: c.phone,
