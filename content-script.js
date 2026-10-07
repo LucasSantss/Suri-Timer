@@ -4,6 +4,8 @@
   const templateCategories = new Map(); // template id (e.g. "cb57489123:template:93787057") -> category|null
   const shopProductsById = new Map(); // product id -> {sku, name}
   const shopCategoriesById = new Map(); // category id -> {name}
+  const platformUserIdsByEmail = new Map(); // lowercased email -> {id, name}
+  const channelsById = new Map(); // channel id -> {name}
 
   let config = null;
   let domainEnabled = true;
@@ -212,6 +214,22 @@
         vertical-align: middle !important;
         background: rgba(100, 116, 139, 0.16) !important;
         color: #64748b !important;
+      }
+
+      .suri-id-badge {
+        display: inline-block !important;
+        margin-left: 8px !important;
+        padding: 1px 8px !important;
+        border-radius: 999px !important;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important;
+        font-size: 11px !important;
+        font-weight: 700 !important;
+        white-space: nowrap !important;
+        vertical-align: middle !important;
+        cursor: copy !important;
+        user-select: all !important;
+        background: rgba(14, 165, 233, 0.16) !important;
+        color: #0ea5e9 !important;
       }
 
       [data-suri-marker] {
@@ -1054,6 +1072,93 @@
     }
   }
 
+  // --- ID badges (Configurações > Usuários / Canais) ---
+  // The users table has no id in its DOM either, so each row is matched by
+  // its e-mail cell (unique per user, unlike names) against the `admins`
+  // records network-interceptor.js captured. The badge goes in the name
+  // cell of that row; click copies the id.
+  function styleIdBadge(host, id) {
+    let badge = host.querySelector(':scope > [data-suri-id-badge]');
+    if (badge && badge.dataset.suriId === id) {
+      return;
+    }
+
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.setAttribute('data-suri-id-badge', 'true');
+      badge.className = 'suri-id-badge';
+      badge.addEventListener('click', (event) => {
+        event.stopPropagation();
+        navigator.clipboard?.writeText(badge.dataset.suriId).then(() => {
+          badge.textContent = 'Copiado!';
+          setTimeout(() => { badge.textContent = `ID: ${badge.dataset.suriId}`; }, 1000);
+        }).catch(() => {});
+      });
+      host.appendChild(badge);
+    }
+
+    badge.dataset.suriId = id;
+    badge.title = 'Clique para copiar o ID';
+    badge.textContent = `ID: ${id}`;
+  }
+
+  function refreshUserIdBadges() {
+    if (!domainEnabled || !platformUserIdsByEmail.size) return;
+
+    for (const cell of document.querySelectorAll('td')) {
+      const user = platformUserIdsByEmail.get(cell.textContent.trim().toLowerCase());
+      if (!user) continue;
+
+      const row = cell.closest('tr');
+      const cells = row ? Array.from(row.cells) : [];
+      const nameCell = cells.find((c) => c !== cell && user.name &&
+        getNameTextExcludingBadge(c, 'data-suri-id-badge') === user.name.trim());
+
+      try {
+        styleIdBadge(nameCell || cell, user.id);
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  // Canais table: matched by the NOME column only (found by its header) —
+  // TIPO can hold the very same text ("WebChat" type, "WebChat" name), so
+  // scanning every cell would badge the wrong one. Gated on a PROVEDOR
+  // header so other tables with a "Nome" column are left alone. Two
+  // channels sharing a name are handed out in order, one per row.
+  function refreshChannelIdBadges() {
+    if (!domainEnabled || !channelsById.size) return;
+
+    for (const table of document.querySelectorAll('table')) {
+      const headers = Array.from(table.querySelectorAll('thead th, thead td'))
+        .map((th) => th.textContent.trim().toLowerCase());
+      const nameIndex = headers.indexOf('nome');
+      if (nameIndex === -1 || !headers.includes('provedor')) continue;
+
+      const byName = getShopCandidatesByName(channelsById);
+      for (const row of table.querySelectorAll('tbody tr')) {
+        const cell = row.cells[nameIndex];
+        if (!cell) continue;
+        const candidates = byName.get(getNameTextExcludingBadge(cell, 'data-suri-id-badge'));
+        const entry = candidates && candidates.shift();
+        if (!entry) continue;
+
+        try {
+          styleIdBadge(cell, entry.id);
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+  }
+
+  function clearAllIdBadges() {
+    for (const badge of document.querySelectorAll('[data-suri-id-badge]')) {
+      badge.remove();
+    }
+  }
+
   // refreshQueueColors() is O(rows × tracked conversations) — with Automático
   // now tracking every conversation (not just the handful active in
   // Atendimentos), repainting the whole visible list on every single 1s tick
@@ -1090,6 +1195,13 @@
       refreshShopRows();
     } catch (e) {
       console.error('[Suri] refreshShopRows falhou:', e);
+    }
+
+    try {
+      refreshUserIdBadges();
+      refreshChannelIdBadges();
+    } catch (e) {
+      console.error('[Suri] refreshIdBadges falhou:', e);
     }
 
     const now = Date.now();
@@ -1154,6 +1266,24 @@
       return;
     }
 
+    if (event.data.type === 'PLATFORM_USER_UPDATE') {
+      const { id, email, name } = event.data.payload || {};
+      if (id && email) {
+        platformUserIdsByEmail.set(email.trim().toLowerCase(), { id, name: name || null });
+        scheduleRefresh();
+      }
+      return;
+    }
+
+    if (event.data.type === 'CHANNEL_UPDATE') {
+      const { id, name } = event.data.payload || {};
+      if (id && name) {
+        channelsById.set(id, { name: name.trim() });
+        scheduleRefresh();
+      }
+      return;
+    }
+
     if (event.data.type !== 'CONVERSATION_UPDATE') {
       return;
     }
@@ -1211,6 +1341,7 @@
       clearAllRowStyles();
       clearAllTemplateBadges();
       clearAllShopBadges();
+      clearAllIdBadges();
       applyPageTheme('light');
       stopColorLoop();
       return;

@@ -6,6 +6,8 @@
   const templateCache = new Map(); // template id -> category
   const shopProductCache = new Map(); // product id -> {sku, name}
   const shopCategoryCache = new Map(); // category id -> {name}
+  const platformUserCache = new Map(); // platform user id -> {email, name}
+  const channelCache = new Map(); // channel id -> name
 
   function normalizePhone(value) {
     return String(value ?? '').replace(/\D/g, '');
@@ -69,6 +71,10 @@
     }
 
     if ('children' in value && 'shopId' in value) {
+      return true;
+    }
+
+    if ('registrationId' in value && 'email' in value) {
       return true;
     }
 
@@ -196,6 +202,75 @@
     postShopCategoryUpdate(id, name);
   }
 
+  function postPlatformUserUpdate(id, email, name) {
+    window.postMessage({
+      source: MESSAGE_NAMESPACE,
+      type: 'PLATFORM_USER_UPDATE',
+      payload: { id, email: email || null, name: name || null }
+    }, window.location.origin);
+  }
+
+  // Platform users (Configurações > Usuários) — the `admins` array of
+  // GET /api/v1/chatbots/{chatbotId}. `registrationId` + `email` together
+  // are specific to this record shape. `id` (e.g. "cb186703688") is the one
+  // to show: `registrationId` is free text that is sometimes a name or empty.
+  function storePlatformUser(record) {
+    const id = record.id;
+    if (!id || typeof id !== 'string') {
+      return;
+    }
+
+    const email = typeof record.email === 'string' ? record.email : null;
+    const name = typeof record.name === 'string' ? record.name : null;
+    const previous = platformUserCache.get(id);
+    if (previous && previous.email === email && previous.name === name) {
+      return;
+    }
+
+    platformUserCache.set(id, { email, name });
+    postPlatformUserUpdate(id, email, name);
+  }
+
+  function postChannelUpdate(id, name) {
+    window.postMessage({
+      source: MESSAGE_NAMESPACE,
+      type: 'CHANNEL_UPDATE',
+      payload: { id, name }
+    }, window.location.origin);
+  }
+
+  // Configurações > Canais (GET .../channels/). Unlike the other payloads
+  // there's no field combination distinctive enough to detect these records
+  // anywhere, so they're picked by request URL instead: every top-level
+  // record with a string `id` + `name` in a /channels response.
+  const CHANNELS_URL_PATTERN = /\/channels\/?(\?|$)/;
+
+  function processChannelsResponse(url, value) {
+    if (!url || !CHANNELS_URL_PATTERN.test(String(url))) {
+      return;
+    }
+
+    let payload = value;
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch (error) {
+        return;
+      }
+    }
+
+    const records = Array.isArray(payload)
+      ? payload
+      : Object.values(payload || {}).find((child) => Array.isArray(child)) || [];
+
+    for (const record of records) {
+      if (!record || typeof record.id !== 'string' || typeof record.name !== 'string') continue;
+      if (channelCache.get(record.id) === record.name) continue;
+      channelCache.set(record.id, record.name);
+      postChannelUpdate(record.id, record.name);
+    }
+  }
+
   function storeConversation(record) {
     if (!record || typeof record !== 'object') {
       return;
@@ -277,6 +352,10 @@
       storeShopCategory(value);
     }
 
+    if ('registrationId' in value && 'email' in value) {
+      storePlatformUser(value);
+    }
+
     for (const child of Object.values(value)) {
       walkObject(child);
     }
@@ -318,7 +397,7 @@
     // loop: if none of the markers appear anywhere in it, no individual
     // segment can contain them either. Keeps the very frequent, tiny
     // SignalR keep-alive pings essentially free.
-    if (!body.includes('dateAnswer') && !body.includes('isWhatsappTemplate') && !body.includes('shopId')) {
+    if (!body.includes('dateAnswer') && !body.includes('isWhatsappTemplate') && !body.includes('shopId') && !body.includes('registrationId')) {
       return;
     }
 
@@ -330,7 +409,7 @@
   }
 
   function processJsonSegment(segment) {
-    if (!segment.includes('dateAnswer') && !segment.includes('isWhatsappTemplate') && !segment.includes('shopId')) {
+    if (!segment.includes('dateAnswer') && !segment.includes('isWhatsappTemplate') && !segment.includes('shopId') && !segment.includes('registrationId')) {
       return;
     }
 
@@ -373,6 +452,7 @@
         const clone = response.clone();
         const text = await clone.text();
         processTextBody(text);
+        processChannelsResponse(response.url, text);
       } catch (error) {
         // Ignore clone/read errors from responses we cannot inspect.
       }
@@ -386,6 +466,7 @@
 
   XMLHttpRequest.prototype.open = function (...args) {
     this.__suriTimerIntercepted = true;
+    this.__suriTimerUrl = args[1];
     return originalOpen.apply(this, args);
   };
 
@@ -395,8 +476,10 @@
         const type = this.responseType;
         if (type === '' || type === 'text') {
           processTextBody(this.responseText);
+          processChannelsResponse(this.responseURL || this.__suriTimerUrl, this.responseText);
         } else if (type === 'json') {
           processResponseValue(this.response);
+          processChannelsResponse(this.responseURL || this.__suriTimerUrl, this.response);
         }
         // Other types (arraybuffer, blob, document) are never JSON — skip.
       } catch (error) {
@@ -470,6 +553,12 @@
     }
     for (const [id, { name }] of shopCategoryCache.entries()) {
       postShopCategoryUpdate(id, name);
+    }
+    for (const [id, { email, name }] of platformUserCache.entries()) {
+      postPlatformUserUpdate(id, email, name);
+    }
+    for (const [id, name] of channelCache.entries()) {
+      postChannelUpdate(id, name);
     }
   });
 })();
