@@ -184,6 +184,40 @@
         color: #e8e6e3 !important;
         border-color: #333a3d !important;
       }
+
+      /* Suri Chat conversation thread (#suriChatIframe, app.chatbotmaker.io
+         .../conversations/chat?mode=embed). The message list background and
+         the bubbles stay light even with Dark Reader running in the frame,
+         so they get the same explicit fallback. Outgoing bubbles
+         (.from-me) keep a blue tint to stay distinguishable. */
+      html.suri-dark-mode-fallback .chat-container,
+      html.suri-dark-mode-fallback .chat-body-container,
+      html.suri-dark-mode-fallback .message-field-container {
+        background-color: #181a1b !important;
+        color: #e8e6e3 !important;
+      }
+
+      html.suri-dark-mode-fallback .message-body-container .message-body {
+        background-color: #25282a !important;
+        color: #e8e6e3 !important;
+      }
+
+      html.suri-dark-mode-fallback .message-body-container.from-me .message-body {
+        background-color: #1d2f45 !important;
+      }
+
+      html.suri-dark-mode-fallback .message-body .chat-text {
+        color: #e8e6e3 !important;
+      }
+
+      html.suri-dark-mode-fallback .message-body .text-link {
+        color: #7db4ff !important;
+      }
+
+      html.suri-dark-mode-fallback .message-body .message-body-info,
+      html.suri-dark-mode-fallback .message-body .message-actions-button svg {
+        color: #9aa0a6 !important;
+      }
     `;
 
     const style = document.createElement('style');
