@@ -10,7 +10,8 @@
     "https://app.talkjs.com/*",
     "https://app.chatbotmaker.io/*",
     "https://flow.chatbotmaker.io/*",
-    "https://api-chat.chatbotmaker.io/*"
+    "https://api-chat.chatbotmaker.io/*",
+    "https://app-chat.chatbotmaker.io/*"
   ],
   "icons": {
     "16": "icons/icon16.png",
@@ -39,7 +40,8 @@
         "https://app.talkjs.com/*",
         "https://app.chatbotmaker.io/*",
         "https://flow.chatbotmaker.io/*",
-        "https://api-chat.chatbotmaker.io/*"
+        "https://api-chat.chatbotmaker.io/*",
+        "https://app-chat.chatbotmaker.io/*"
       ],
       "js": ["network-interceptor.js"],
       "run_at": "document_start",
@@ -53,7 +55,8 @@
         "https://app.talkjs.com/*",
         "https://app.chatbotmaker.io/*",
         "https://flow.chatbotmaker.io/*",
-        "https://api-chat.chatbotmaker.io/*"
+        "https://api-chat.chatbotmaker.io/*",
+        "https://app-chat.chatbotmaker.io/*"
       ],
       "js": ["vendor/darkreader.js", "selectors.js", "storage.js", "content-script.js"],
       "run_at": "document_idle",

@@ -88,6 +88,80 @@
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
+  // Dark-mode-only fallback rules. Kept in their own <style>, added and
+  // removed as a whole, instead of being gated by a class on <html>: apps
+  // like the Suri Chat iframe (React/MUI) can rewrite <html>'s attributes
+  // for their own theming, which would silently turn every rule off.
+  const DARK_FALLBACK_CSS = `
+      /* Fallback base background for screens whose color comes from
+         JS-computed values Dark Reader can't rewrite (some Material-UI
+         sections read runtime CSS custom properties instead of static
+         stylesheet rules). This only paints the base layer — any element
+         with its own background (cards, panels, anything Dark Reader
+         already themes correctly) still sits on top of it unaffected. */
+      :root body,
+      :root #root,
+      :root main {
+        background-color: #181a1b !important;
+      }
+
+      /* MUI Card panels (.MuiCard-root) — confirmed via DevTools that their
+         emotion-generated background rule (e.g. .css-123kfj0, hash changes
+         per deploy) stays white; Dark Reader isn't converting it for some
+         reason. .MuiCard-root itself is a stable class MUI always adds
+         alongside the hashed one, so target that instead. Scoped to Card
+         specifically (not the broader .MuiPaper-root, which the app bar and
+         other already-correctly-dark elements also use) to avoid flattening
+         elevation shading Dark Reader already got right elsewhere. */
+      :root .MuiCard-root {
+        background-color: #181a1b !important;
+        color: #e8e6e3 !important;
+      }
+
+      /* Flow-builder node cards (Fluxos screen, react-flow-based). Same
+         "own explicit background Dark Reader isn't reaching" situation as
+         the MUI cards above — .flow-node is a plain, stable app class. */
+      :root .flow-node {
+        background-color: #181a1b !important;
+        color: #e8e6e3 !important;
+        border-color: #333a3d !important;
+      }
+
+      /* Suri Chat conversation thread (#suriChatIframe, app.chatbotmaker.io
+         .../conversations/chat?mode=embed). The message list background and
+         the bubbles stay light even with Dark Reader running in the frame,
+         so they get the same explicit fallback. Outgoing bubbles
+         (.from-me) keep a blue tint to stay distinguishable. */
+      :root .chat-container,
+      :root .chat-body-container,
+      :root .message-field-container {
+        background-color: #181a1b !important;
+        color: #e8e6e3 !important;
+      }
+
+      :root .message-body-container .message-body {
+        background-color: #25282a !important;
+        color: #e8e6e3 !important;
+      }
+
+      :root .message-body-container.from-me .message-body {
+        background-color: #1d2f45 !important;
+      }
+
+      :root .message-body .chat-text {
+        color: #e8e6e3 !important;
+      }
+
+      :root .message-body .text-link {
+        color: #7db4ff !important;
+      }
+
+      :root .message-body .message-body-info,
+      :root .message-body .message-actions-button svg {
+        color: #9aa0a6 !important;
+      }
+  `;
+
   // Inject the (scoped) highlight style for the participant name and the
   // queue-row marker (only once). The dark theme itself is handled entirely
   // by the vendored Dark Reader engine (vendor/darkreader.js) — it analyzes
@@ -150,80 +224,30 @@
         pointer-events: none !important;
         z-index: 2 !important;
       }
-
-      /* Fallback base background for screens whose color comes from
-         JS-computed values Dark Reader can't rewrite (some Material-UI
-         sections read runtime CSS custom properties instead of static
-         stylesheet rules). This only paints the base layer — any element
-         with its own background (cards, panels, anything Dark Reader
-         already themes correctly) still sits on top of it unaffected. */
-      html.suri-dark-mode-fallback body,
-      html.suri-dark-mode-fallback #root,
-      html.suri-dark-mode-fallback main {
-        background-color: #181a1b !important;
-      }
-
-      /* MUI Card panels (.MuiCard-root) — confirmed via DevTools that their
-         emotion-generated background rule (e.g. .css-123kfj0, hash changes
-         per deploy) stays white; Dark Reader isn't converting it for some
-         reason. .MuiCard-root itself is a stable class MUI always adds
-         alongside the hashed one, so target that instead. Scoped to Card
-         specifically (not the broader .MuiPaper-root, which the app bar and
-         other already-correctly-dark elements also use) to avoid flattening
-         elevation shading Dark Reader already got right elsewhere. */
-      html.suri-dark-mode-fallback .MuiCard-root {
-        background-color: #181a1b !important;
-        color: #e8e6e3 !important;
-      }
-
-      /* Flow-builder node cards (Fluxos screen, react-flow-based). Same
-         "own explicit background Dark Reader isn't reaching" situation as
-         the MUI cards above — .flow-node is a plain, stable app class. */
-      html.suri-dark-mode-fallback .flow-node {
-        background-color: #181a1b !important;
-        color: #e8e6e3 !important;
-        border-color: #333a3d !important;
-      }
-
-      /* Suri Chat conversation thread (#suriChatIframe, app.chatbotmaker.io
-         .../conversations/chat?mode=embed). The message list background and
-         the bubbles stay light even with Dark Reader running in the frame,
-         so they get the same explicit fallback. Outgoing bubbles
-         (.from-me) keep a blue tint to stay distinguishable. */
-      html.suri-dark-mode-fallback .chat-container,
-      html.suri-dark-mode-fallback .chat-body-container,
-      html.suri-dark-mode-fallback .message-field-container {
-        background-color: #181a1b !important;
-        color: #e8e6e3 !important;
-      }
-
-      html.suri-dark-mode-fallback .message-body-container .message-body {
-        background-color: #25282a !important;
-        color: #e8e6e3 !important;
-      }
-
-      html.suri-dark-mode-fallback .message-body-container.from-me .message-body {
-        background-color: #1d2f45 !important;
-      }
-
-      html.suri-dark-mode-fallback .message-body .chat-text {
-        color: #e8e6e3 !important;
-      }
-
-      html.suri-dark-mode-fallback .message-body .text-link {
-        color: #7db4ff !important;
-      }
-
-      html.suri-dark-mode-fallback .message-body .message-body-info,
-      html.suri-dark-mode-fallback .message-body .message-actions-button svg {
-        color: #9aa0a6 !important;
-      }
     `;
 
     const style = document.createElement('style');
     style.setAttribute('data-suri', 'global-style');
     style.textContent = css;
     document.head?.appendChild(style);
+  }
+
+  // Re-appended if the page dropped it (e.g. an SPA re-rendering <head>);
+  // the forced theme refresh on DOM changes calls this again.
+  function setDarkFallback(enabled) {
+    let style = document.querySelector('style[data-suri="dark-fallback"]');
+    if (!enabled) {
+      style?.remove();
+      return;
+    }
+    if (!style) {
+      style = document.createElement('style');
+      style.setAttribute('data-suri', 'dark-fallback');
+      style.textContent = DARK_FALLBACK_CSS;
+    }
+    if (!style.isConnected) {
+      (document.head || document.documentElement).appendChild(style);
+    }
   }
 
   // Without this, Dark Reader can't read the CSS rules of any stylesheet
@@ -287,7 +311,7 @@
     }
 
     injectGlobalStyles();
-    document.documentElement.classList.toggle('suri-dark-mode-fallback', theme === 'dark');
+    setDarkFallback(theme === 'dark');
 
     if (theme === 'dark') {
       applyLightFilter(100, 100);
