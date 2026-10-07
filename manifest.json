@@ -38,7 +38,8 @@
         "https://portal.suri.ai/*",
         "https://app.talkjs.com/*",
         "https://app.chatbotmaker.io/*",
-        "https://flow.chatbotmaker.io/*"
+        "https://flow.chatbotmaker.io/*",
+        "https://api-chat.chatbotmaker.io/*"
       ],
       "js": ["network-interceptor.js"],
       "run_at": "document_start",
@@ -51,7 +52,8 @@
         "https://portal.suri.ai/*",
         "https://app.talkjs.com/*",
         "https://app.chatbotmaker.io/*",
-        "https://flow.chatbotmaker.io/*"
+        "https://flow.chatbotmaker.io/*",
+        "https://api-chat.chatbotmaker.io/*"
       ],
       "js": ["vendor/darkreader.js", "selectors.js", "storage.js", "content-script.js"],
       "run_at": "document_idle",
