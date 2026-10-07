@@ -9,7 +9,8 @@
     "https://portal.suri.ai/*",
     "https://app.talkjs.com/*",
     "https://app.chatbotmaker.io/*",
-    "https://flow.chatbotmaker.io/*"
+    "https://flow.chatbotmaker.io/*",
+    "https://api-chat.chatbotmaker.io/*"
   ],
   "icons": {
     "16": "icons/icon16.png",
